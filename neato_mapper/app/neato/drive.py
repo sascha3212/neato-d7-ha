@@ -24,6 +24,10 @@ WATCH_INTERVAL_S = 0.3
 MAX_DROP_MM = 60
 # Room needed in the travel direction beyond the move itself (robot radius + margin)
 CLEARANCE_MARGIN_MM = 250
+# How far the drive test goes out of the dock: as far as the lidar allows, up
+# to the maximum, but not less than the minimum
+OUT_MAX_MM = 300
+OUT_MIN_MM = 120
 # Wheel arc for a 90 degree turn in place (D7 wheelbase ~240 mm)
 QUARTER_TURN_MM = 190
 
@@ -124,7 +128,7 @@ class Driver:
                 _LOGGER.error("Could not send %r while leaving TestMode: %s", cmd, err)
 
     async def drive_test(self) -> DriveLog:
-        """Drive 30 cm out of the dock, turn a full circle in four steps, reverse
+        """Drive up to 30 cm out of the dock, turn a full circle in four steps, reverse
         back in, and record everything on the way.
 
         Neatos back into their dock, so leaving it is a forward move.
@@ -133,15 +137,19 @@ class Driver:
         await self.enter()
         try:
             scan = await self.snapshot("testmode_docked")
-            await self.move(300, 300, scan)
+            free = p.clearance_mm(scan, 0)
+            out_mm = OUT_MAX_MM if free is None else min(OUT_MAX_MM, free - CLEARANCE_MARGIN_MM)
+            if out_mm < OUT_MIN_MM:
+                raise DriveAborted(f"only {free} mm free in front of the dock")
+            await self.move(out_mm, out_mm, scan)
             scan = await self.snapshot("off_dock")
             for i in range(4):
                 await self.move(-QUARTER_TURN_MM, QUARTER_TURN_MM, scan)
                 scan = await self.snapshot(f"turn_{i + 1}")
             # The robot only finds its dock by itself during a clean, so it
-            # reverses the 30 cm back in. The dock is right behind it, so no
+            # reverses the same distance back in. The dock is right behind it, so no
             # lidar clearance check here; the bumpers still stop it.
-            await self.move(-300, -300, scan, check_clearance=False)
+            await self.move(-out_mm, -out_mm, scan, check_clearance=False)
             await asyncio.sleep(2)
             self.log.docked = p.parse_charger(await self.link.command("GetCharger")).external_power
             await self.snapshot("back_on_dock")

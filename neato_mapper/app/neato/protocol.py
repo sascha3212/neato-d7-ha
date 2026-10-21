@@ -70,6 +70,14 @@ def strip_echo(raw: str, command: str) -> str:
     return "\n".join(lines)
 
 
+def echoes(raw: str, command: str) -> bool:
+    """True if the answer starts with the robot's echo of this command."""
+    for line in raw.replace("\r", "").split("\n"):
+        if line.strip():
+            return line.strip().lower() == command.strip().lower()
+    return False
+
+
 def csv_values(raw: str) -> dict[str, str]:
     """Map "Label,Value[,...]" lines to {label: value}, trailing commas removed."""
     values: dict[str, str] = {}

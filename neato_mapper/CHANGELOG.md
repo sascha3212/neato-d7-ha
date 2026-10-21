@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Every answer is checked against the robot's echo of the command; on a
+  mismatch the add-on reconnects instead of reading answers one behind
+- Drive test goes out of the dock as far as the lidar allows (12-30 cm)
+
 ## 0.3.1
 
 - Drive test reverses the 30 cm back into the dock itself and checks the

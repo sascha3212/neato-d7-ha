@@ -89,3 +89,10 @@ def test_version_fields():
     old = p.csv_values("Product Model,BotVacD5Connected,,\r\nSoftware,4,5,3\r\n")
     assert p.product_model(old) == "BotVacD5Connected"
     assert p.software_version(old) == "4.5.3"
+
+
+def test_echoes():
+    assert p.echoes("GetCharger\r\nLabel,Value\r\n", "GetCharger")
+    assert p.echoes("\r\ngetcharger\r\n", "GetCharger")
+    assert not p.echoes("GetState\r\nCurrent UI State is: X\r\n", "GetCharger")
+    assert not p.echoes("", "GetCharger")

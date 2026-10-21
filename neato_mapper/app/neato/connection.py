@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from .protocol import TERMINATOR, strip_echo
+from .protocol import TERMINATOR, echoes, strip_echo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,5 +73,11 @@ class RobotLink:
                 await self.close()
                 raise ConnectionError(f"{cmd} failed: {err}") from err
             text = data[: -len(TERMINATOR)].decode("ascii", errors="replace")
+            if not echoes(text, cmd):
+                # An answer to an earlier command (after a timeout, say): every
+                # answer from here on would be one behind, so start over clean
+                _LOGGER.warning("Answer to %r doesn't start with its echo, resyncing", cmd)
+                await self.close()
+                raise ConnectionError(f"{cmd}: out of sync with the robot")
             await asyncio.sleep(INTER_COMMAND_DELAY_S)
             return strip_echo(text, cmd)

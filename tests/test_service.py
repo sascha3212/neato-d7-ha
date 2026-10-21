@@ -210,3 +210,25 @@ def test_drive_test_stops_on_bumper(fast, monkeypatch, tmp_path):
     assert ha.published["drive/state"].startswith("stopped: bumper")
     assert robot.wheels_mm == [0.0, 0.0]
     assert not robot.test_mode
+
+
+def test_out_of_sync_answer_reconnects():
+    from neato.connection import RobotLink
+
+    async def scenario():
+        async def handle(reader, writer):
+            await reader.readline()
+            writer.write(b"GetState\r\nCurrent UI State is: X\r\n\x1a")  # answer to something else
+            await writer.drain()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        link = RobotLink("127.0.0.1", port)
+        try:
+            with pytest.raises(ConnectionError):
+                await link.command("GetCharger")
+            assert not link.connected
+        finally:
+            server.close()
+
+    asyncio.run(scenario())
