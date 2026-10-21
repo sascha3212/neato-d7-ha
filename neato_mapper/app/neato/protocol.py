@@ -116,6 +116,48 @@ def parse_charger(raw: str) -> Charger:
     )
 
 
+# On/off robot settings: (object id, name, SetUserSettings key,
+# GetUserSettings label, icon, inverted). The two commands use different names,
+# and "inverted" means the set key means the opposite of the switch.
+TOGGLE_SETTINGS = [
+    ("intense_clean", "Intense clean", "IntenseClean", "IntenseClean", "mdi:repeat", False),
+    ("edge_cleaning", "Edge cleaning", "WallEnable", "Wall Enable", "mdi:wall", False),
+    ("bin_full_detect", "Bin full detection", "BinFullDetect", "Bin Full Detect", "mdi:delete-alert", False),
+    ("button_sounds", "Button sounds", "ButtonClick", "ClickSounds", "mdi:gesture-tap-button", False),
+    ("melodies", "Melodies", "Melodies", "Melody Sounds", "mdi:music-note", False),
+    ("warning_sounds", "Warning sounds", "Warnings", "Warning Sounds", "mdi:alert", False),
+    # "LED, ON" means the lights are visible; StealthLED ON hides them
+    ("status_lights", "Status lights", "StealthLED", "LED", "mdi:led-on", True),
+]
+
+FAN_SPEEDS = ["eco", "turbo"]  # SetUserSettings EcoMode ON / OFF
+NAVIGATION_MODES = ["Normal", "Gentle", "Deep", "Quick"]
+LOCATE_SOUND_ID = 19  # "Alert"
+
+
+def parse_user_settings(raw: str) -> dict[str, str]:
+    """GetUserSettings answers "Label, Value" lines; values are ON/OFF or numbers."""
+    return csv_values(raw)
+
+
+def toggle_state(settings: dict[str, str], label: str) -> bool | None:
+    value = settings.get(label)
+    if value not in ("ON", "OFF"):
+        return None
+    return value == "ON"
+
+
+def set_toggle(key: str, on: bool, inverted: bool) -> str:
+    return f"SetUserSettings {key} {'ON' if on != inverted else 'OFF'}"
+
+
+def fan_speed(settings: dict[str, str]) -> str | None:
+    value = settings.get("Eco Mode")
+    if value not in ("ON", "OFF"):
+        return None
+    return "eco" if value == "ON" else "turbo"
+
+
 _POSE_FIELD = r"{name}\s*=\s*(-?\d+(?:\.\d+)?)"
 
 

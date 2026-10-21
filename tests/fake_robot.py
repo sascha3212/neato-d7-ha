@@ -48,6 +48,12 @@ class FakeRobot:
         self.cleaning = False
         self.paused = False
         self.travel = 0.0
+        self.user_settings = {
+            "ClickSounds": "OFF", "LED": "ON", "Wall Enable": "ON", "Eco Mode": "ON",
+            "IntenseClean": "OFF", "Melody Sounds": "OFF", "Warning Sounds": "ON", "Bin Full Detect": "ON",
+        }
+        self.navigation_mode = "Normal"
+        self.sounds: list[str] = []
         self.rng = np.random.default_rng(7)
         seg = np.array(WALLS)
         self._a = seg[:, :2]
@@ -140,6 +146,23 @@ class FakeRobot:
                 self.paused = True
             elif "STOP" in cmd or "SEND_TO_BASE" in cmd:
                 self.cleaning, self.paused, self.travel = False, False, 0.0
+            return ""
+        if low == "getusersettings":
+            self.advance(0.05)
+            return "".join(f"{k}, {v}\r\n" for k, v in self.user_settings.items()) + "Schedule is Disabled\r\n"
+        if low.startswith("setusersettings"):
+            self.advance(0.05)
+            _, key, value = cmd.split()
+            label = {"EcoMode": "Eco Mode", "WallEnable": "Wall Enable", "StealthLED": "LED"}.get(key, key)
+            if key == "StealthLED":
+                value = "OFF" if value == "ON" else "ON"
+            self.user_settings[label] = value
+            return ""
+        if low.startswith("setnavigationmode"):
+            self.navigation_mode = cmd.split()[1]
+            return ""
+        if low.startswith("playsound"):
+            self.sounds.append(cmd)
             return ""
         if low == "clean house":
             self.cleaning, self.paused = True, False

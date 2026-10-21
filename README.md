@@ -9,11 +9,15 @@ Assistant over Wi-Fi, and the **Neato Mapper** add-on does the rest.
 *A map built by the add-on from a simulated two-room clean: walls from the
 lidar, the cleaning path in blue, the dock in green and the robot in orange.*
 
-## What works (stage 1)
+## What works
 
 - A floor map that builds up from the robot's lidar during every normal clean
   and is shown in Home Assistant as `camera.neato_map`
-- A vacuum entity: start, pause, resume, stop, spot clean, return to base
+- A vacuum entity: start, pause, resume, stop, spot clean, return to base,
+  locate, and eco / turbo power
+- Navigation mode (normal, gentle, deep, quick) and switches for intense
+  clean, edge cleaning, sounds, status lights and bin full detection
+- Schedules through Home Assistant automations (example in the add-on docs)
 - Battery, robot state and error sensors
 - A "Reset map" button and a raw serial command for diagnostics
 

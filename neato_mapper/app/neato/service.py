@@ -51,6 +51,10 @@ class NeatoService:
         self.error: p.RobotError | None = None
         self.charger: p.Charger | None = None
         self._last_charger = 0.0
+        self.settings: dict[str, str] = {}
+        self._last_settings = 0.0
+        self.settings_file = opts.data_dir / "settings.json"
+        self.navigation_mode = self._load_navigation_mode()
         self._last_map_publish = 0.0
         self._last_map_save = time.monotonic()
         self._map_dirty = True
@@ -90,6 +94,7 @@ class NeatoService:
                      "ok" if self.skey else "unavailable (using plain Clean commands)")
         self.ha.set_available(True)
         self._published.clear()
+        self._last_settings = 0.0
         while True:
             await self._tick()
 
@@ -108,6 +113,8 @@ class NeatoService:
         if self.charger is None or now - self._last_charger > CHARGER_INTERVAL_S:
             self.charger = p.parse_charger(await self.link.command("GetCharger"))
             self._last_charger = now
+        if not was_active and now - self._last_settings > CHARGER_INTERVAL_S:
+            await self._read_settings()
         self._publish_status()
 
         active = self._mapping_active()
@@ -147,11 +154,19 @@ class NeatoService:
             self.ha.publish(suffix, text)
 
     def _publish_status(self) -> None:
-        self._publish_once("state", {"state": p.ha_vacuum_state(self.state.ui_state, self.charger, self.error)})
+        state = {"state": p.ha_vacuum_state(self.state.ui_state, self.charger, self.error)}
+        if p.fan_speed(self.settings):
+            state["fan_speed"] = p.fan_speed(self.settings)
+        self._publish_once("state", state)
         self._publish_once("robot_state", self.state.ui_state.replace("UIMGR_STATE_", "").lower() or "unknown")
         self._publish_once("error", f"{self.error.code} {self.error.message}" if self.error else "none")
         if self.charger and self.charger.battery_percent is not None:
             self._publish_once("battery", self.charger.battery_percent)
+        self._publish_once("settings/navigation_mode", self.navigation_mode)
+        for object_id, _name, _key, label, _icon, _inverted in p.TOGGLE_SETTINGS:
+            on = p.toggle_state(self.settings, label)
+            if on is not None:
+                self._publish_once(f"settings/{object_id}", "ON" if on else "OFF")
         self._publish_once("attributes", {
             "ui_state": self.state.ui_state,
             "robot_state": self.state.robot_state,
@@ -178,6 +193,52 @@ class NeatoService:
         if now - self._last_map_save > MAP_SAVE_INTERVAL_S:
             self._save_map()
 
+    # -- robot settings ----------------------------------------------------
+
+    async def _read_settings(self) -> None:
+        settings = p.parse_user_settings(await self.link.command("GetUserSettings"))
+        if settings:
+            self.settings = settings
+        self._last_settings = time.monotonic()
+
+    def _load_navigation_mode(self) -> str:
+        try:
+            mode = json.loads(self.settings_file.read_text()).get("navigation_mode")
+        except (OSError, ValueError, AttributeError):
+            mode = None
+        return mode if mode in p.NAVIGATION_MODES else "Normal"
+
+    def _save_navigation_mode(self) -> None:
+        try:
+            self.settings_file.write_text(json.dumps({"navigation_mode": self.navigation_mode}))
+        except OSError as err:
+            _LOGGER.warning("Could not save settings: %s", err)
+
+    async def _set_setting(self, object_id: str, payload: str) -> None:
+        _LOGGER.info("Setting %s -> %s", object_id, payload)
+        if object_id == "fan_speed":
+            if payload not in p.FAN_SPEEDS:
+                _LOGGER.warning("Unknown fan speed %r", payload)
+                return
+            await self.link.command(f"SetUserSettings EcoMode {'ON' if payload == 'eco' else 'OFF'}")
+        elif object_id == "navigation_mode":
+            if payload not in p.NAVIGATION_MODES:
+                _LOGGER.warning("Unknown navigation mode %r", payload)
+                return
+            # The robot forgets this on restart, so it is also sent before every clean
+            self.navigation_mode = payload
+            self._save_navigation_mode()
+            await self.link.command(f"SetNavigationMode {payload}")
+        else:
+            toggle = next((t for t in p.TOGGLE_SETTINGS if t[0] == object_id), None)
+            if toggle is None or payload not in ("ON", "OFF"):
+                _LOGGER.warning("Unknown setting %s=%r", object_id, payload)
+                return
+            _id, _name, key, _label, _icon, inverted = toggle
+            await self.link.command(p.set_toggle(key, payload == "ON", inverted))
+        await self._read_settings()
+        self._publish_status()
+
     def _save_map(self) -> None:
         self.map.save(self.map_file)
         self._last_map_save = time.monotonic()
@@ -189,6 +250,8 @@ class NeatoService:
             await self._vacuum_command(payload.strip())
         elif topic == self.ha.topic("send_command"):
             await self._custom_command(payload.strip())
+        elif topic.startswith(self.ha.topic("set/")):
+            await self._set_setting(topic.rsplit("/", 1)[1], payload.strip())
 
     async def _event(self, event: str, fallback: str | None) -> None:
         if self.skey:
@@ -205,6 +268,7 @@ class NeatoService:
             if p.is_paused(ui):
                 await self._event(p.EVT_RESUME, "Clean House")
             else:
+                await self.link.command(f"SetNavigationMode {self.navigation_mode}")
                 await self._event(p.EVT_START_HOUSE, "Clean House")
         elif cmd == "pause":
             await self._event(p.EVT_PAUSE, None)
@@ -214,6 +278,8 @@ class NeatoService:
             await self._event(p.EVT_SEND_TO_BASE, None)
         elif cmd == "clean_spot":
             await self._event(p.EVT_START_SPOT, "Clean Spot")
+        elif cmd == "locate":
+            await self.link.command(f"PlaySound SoundID {p.LOCATE_SOUND_ID}")
         else:
             _LOGGER.warning("Unsupported vacuum command %r", cmd)
 

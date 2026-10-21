@@ -81,3 +81,48 @@ def test_clean_builds_and_publishes_map(fast, tmp_path):
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_settings_modes_and_locate(fast, tmp_path):
+    async def scenario():
+        robot = FakeRobot(speed=0.3)
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "settings/status_lights" in ha.published)
+            assert json.loads(ha.published["state"])["fan_speed"] == "eco"
+            assert ha.published["settings/edge_cleaning"] == "ON"
+            assert ha.published["settings/button_sounds"] == "OFF"
+            assert ha.published["settings/status_lights"] == "ON"
+            assert ha.published["settings/navigation_mode"] == "Normal"
+
+            ha.on_command(ha.topic("set/fan_speed"), "turbo")
+            await wait_for(lambda: json.loads(ha.published["state"]).get("fan_speed") == "turbo")
+            assert robot.user_settings["Eco Mode"] == "OFF"
+
+            ha.on_command(ha.topic("set/status_lights"), "OFF")
+            await wait_for(lambda: ha.published["settings/status_lights"] == "OFF")
+            assert robot.user_settings["LED"] == "OFF"
+
+            ha.on_command(ha.topic("set/intense_clean"), "ON")
+            await wait_for(lambda: ha.published["settings/intense_clean"] == "ON")
+
+            ha.on_command(ha.topic("set/navigation_mode"), "Deep")
+            await wait_for(lambda: ha.published["settings/navigation_mode"] == "Deep")
+            robot.navigation_mode = "Normal"  # the robot forgets it on restart
+            ha.on_command(ha.topic("command"), "start")
+            await wait_for(lambda: robot.cleaning)
+            assert robot.navigation_mode == "Deep"
+            assert json.loads((tmp_path / "settings.json").read_text())["navigation_mode"] == "Deep"
+
+            ha.on_command(ha.topic("command"), "locate")
+            await wait_for(lambda: robot.sounds)
+            assert robot.sounds == ["PlaySound SoundID 19"]
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())

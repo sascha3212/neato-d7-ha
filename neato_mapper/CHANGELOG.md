@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Cleaning power as the vacuum's fan speed: eco or turbo
+- Navigation mode select (Normal, Gentle, Deep, Quick), remembered by the
+  add-on and sent before every house clean because the robot forgets it
+- Switches for intense clean, edge cleaning, bin full detection, button
+  sounds, melodies, warning sounds and status lights
+- Locate: the robot plays its alert sound
+
 ## 0.1.1
 
 - Sharper map: 3 cm cells (was 5 cm), 1 cm per pixel output

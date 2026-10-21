@@ -8,6 +8,8 @@ from typing import Callable
 
 import paho.mqtt.client as mqtt
 
+from .protocol import FAN_SPEEDS, NAVIGATION_MODES, TOGGLE_SETTINGS
+
 _LOGGER = logging.getLogger(__name__)
 
 DISCOVERY_PREFIX = "homeassistant"
@@ -58,6 +60,7 @@ class HaMqtt:
         _LOGGER.info("Connected to MQTT broker")
         client.subscribe(self.topic("command"))
         client.subscribe(self.topic("send_command"))
+        client.subscribe(self.topic("set/+"))
         client.subscribe(f"{DISCOVERY_PREFIX}/status")
         self.publish_discovery()
 
@@ -96,9 +99,35 @@ class HaMqtt:
             "command_topic": self.topic("command"),
             "send_command_topic": self.topic("send_command"),
             "json_attributes_topic": self.topic("attributes"),
+            "set_fan_speed_topic": self.topic("set/fan_speed"),
+            "fan_speed_list": FAN_SPEEDS,
             "supported_features": [
-                "start", "stop", "pause", "return_home", "status", "send_command", "clean_spot",
+                "start", "stop", "pause", "return_home", "status", "send_command",
+                "clean_spot", "locate", "fan_speed",
             ],
+        })
+        self._config("select", "navigation_mode", {
+            "name": "Navigation mode",
+            "command_topic": self.topic("set/navigation_mode"),
+            "state_topic": self.topic("settings/navigation_mode"),
+            "options": NAVIGATION_MODES,
+            "icon": "mdi:map-marker-path",
+        })
+        for object_id, name, _key, _label, icon, _inverted in TOGGLE_SETTINGS:
+            self._config("switch", object_id, {
+                "name": name,
+                "command_topic": self.topic(f"set/{object_id}"),
+                "state_topic": self.topic(f"settings/{object_id}"),
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "entity_category": "config",
+                "icon": icon,
+            })
+        self._config("button", "locate", {
+            "name": "Locate",
+            "command_topic": self.topic("command"),
+            "payload_press": "locate",
+            "icon": "mdi:map-marker-question",
         })
         self._config("camera", "map", {
             "name": "Map",

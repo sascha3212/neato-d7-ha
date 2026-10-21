@@ -62,3 +62,21 @@ def test_real_d7_answers():
     charger = p.parse_charger(p.strip_echo(REAL_CHARGER, "GetCharger"))
     assert charger.battery_percent == 98 and charger.external_power and not charger.charging
     assert p.ha_vacuum_state(state.ui_state, charger, None) == "docked"
+
+
+D7_USER_SETTINGS = (
+    "GetUserSettings\r\nLanguage, EL_NONE\r\nClickSounds, OFF\r\nLED, ON\r\nWall Enable, ON\r\n"
+    "Eco Mode, ON\r\nIntenseClean, OFF\r\nWiFi, ON\r\nMelody Sounds, OFF\r\nWarning Sounds, ON\r\n"
+    "Bin Full Detect, ON\r\nFilter Change Time (seconds), 43200\r\nSchedule is Disabled\r\n"
+)
+
+
+def test_user_settings():
+    s = p.parse_user_settings(p.strip_echo(D7_USER_SETTINGS, "GetUserSettings"))
+    assert p.fan_speed(s) == "eco"
+    assert p.toggle_state(s, "Wall Enable") is True
+    assert p.toggle_state(s, "ClickSounds") is False
+    assert p.toggle_state(s, "LED") is True  # lights visible
+    assert p.toggle_state(s, "Missing") is None
+    assert p.set_toggle("StealthLED", True, True) == "SetUserSettings StealthLED OFF"
+    assert p.set_toggle("WallEnable", False, False) == "SetUserSettings WallEnable OFF"
