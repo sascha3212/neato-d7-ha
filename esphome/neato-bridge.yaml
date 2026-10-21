@@ -19,6 +19,8 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
+  # oxan/esphome-stream-server doesn't build on ESPHome 2026.10 yet; 2026.4.x
+  # is known to work. Use that version of ESPHome to compile this file.
 
 esp32:
   # For an ESP32-C3 board use: variant: ESP32C3 (and the C3 pins above)
@@ -53,6 +55,9 @@ wifi:
   # First upload over fang: uncomment and put the ESP's current IP here, since
   # the new name (neato-bridge.local) doesn't exist on the network yet
   # use_address: 192.168.1.50
+  # Small ESP32-C3 boards brown out inside the Neato when Wi-Fi starts at
+  # full power (~20 dB); 8.5 dB is plenty and keeps the supply stable
+  output_power: 8.5dB
   ap:
     ssid: "${name}-fallback"
 
