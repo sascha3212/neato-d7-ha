@@ -9,6 +9,10 @@ from .protocol import TERMINATOR, strip_echo
 
 _LOGGER = logging.getLogger(__name__)
 
+# Pause between commands; the robot's serial task can hang when it is
+# hammered back to back while it cleans
+INTER_COMMAND_DELAY_S = 0.1
+
 
 class RobotLink:
     """One command at a time, each answer read up to the 0x1A terminator."""
@@ -69,4 +73,5 @@ class RobotLink:
                 await self.close()
                 raise ConnectionError(f"{cmd} failed: {err}") from err
             text = data[: -len(TERMINATOR)].decode("ascii", errors="replace")
+            await asyncio.sleep(INTER_COMMAND_DELAY_S)
             return strip_echo(text, cmd)

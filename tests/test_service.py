@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from neato import connection
 from neato import service as svc
 from tests.fake_robot import FakeRobot
 
@@ -36,6 +37,8 @@ def fast(monkeypatch):
     monkeypatch.setattr(svc, "HaMqtt", RecordingHa)
     monkeypatch.setattr(svc, "STATUS_INTERVAL_S", 0.01)
     monkeypatch.setattr(svc, "MAP_PUBLISH_INTERVAL_S", 0.0)
+    monkeypatch.setattr(svc, "SCAN_INTERVAL_S", 0.0)
+    monkeypatch.setattr(connection, "INTER_COMMAND_DELAY_S", 0.0)
 
 
 async def wait_for(predicate, timeout=20.0):

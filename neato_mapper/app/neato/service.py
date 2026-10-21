@@ -21,6 +21,11 @@ STATUS_INTERVAL_S = 2.0
 CHARGER_INTERVAL_S = 60.0
 MAP_PUBLISH_INTERVAL_S = 5.0
 MAP_SAVE_INTERVAL_S = 60.0
+# A lidar scan is ~5 KB at 115200 baud. Asking for them back to back while the
+# robot cleans made a D7 (4.4.0) stop answering on serial, so scans are spaced
+# out, and spaced further after any failure during a clean.
+SCAN_INTERVAL_S = 4.0
+SCAN_INTERVAL_MAX_S = 30.0
 
 
 @dataclass
@@ -51,6 +56,8 @@ class NeatoService:
         self.error: p.RobotError | None = None
         self.charger: p.Charger | None = None
         self._last_charger = 0.0
+        self._last_scan = 0.0
+        self.scan_interval = SCAN_INTERVAL_S
         self.settings: dict[str, str] = {}
         self._last_settings = 0.0
         self.settings_file = opts.data_dir / "settings.json"
@@ -121,21 +128,29 @@ class NeatoService:
         if active and not was_active:
             _LOGGER.info("Cleaning started, recording a new path")
             self.map.start_session()
-        if active:
+        if active and now - self._last_scan >= self.scan_interval:
+            self._last_scan = now
             await self._map_step()
         elif was_active:
             _LOGGER.info("Cleaning finished: %d scans in map", self.map.scans_used)
             self._save_map()
 
         self._maybe_publish_map(force=was_active and not active)
-        if not active:
-            await asyncio.sleep(STATUS_INTERVAL_S)
+        await asyncio.sleep(STATUS_INTERVAL_S)
 
     def _mapping_active(self) -> bool:
         ui = self.state.ui_state
         return p.is_cleaning(ui) or "DOCKING" in ui
 
     async def _map_step(self) -> None:
+        try:
+            await self._scan_once()
+        except ConnectionError:
+            self.scan_interval = min(self.scan_interval * 2, SCAN_INTERVAL_MAX_S)
+            _LOGGER.warning("Scan failed during a clean, next scans every %.0fs", self.scan_interval)
+            raise
+
+    async def _scan_once(self) -> None:
         before = p.parse_pose(await self.link.command("GetRobotPos Smooth"))
         scan, _speed = p.parse_lds_scan(await self.link.command("GetLDSScan", timeout=8))
         after = p.parse_pose(await self.link.command("GetRobotPos Smooth"))

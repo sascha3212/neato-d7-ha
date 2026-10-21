@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Gentler on the robot while it cleans: one lidar scan every 4 s (was back
+  to back) and a short pause between serial commands. A D7 on 4.4.0 stopped
+  answering on serial after about a minute of continuous scans.
+- Scans slow down further (up to every 30 s) after a failed command
+- Shows the D7's model and software version correctly in the log
+
 ## 0.2.0
 
 - Cleaning power as the vacuum's fan speed: eco or turbo
