@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+After the first real Explore run gave up after 4 minutes in a furnished room:
+
+- Drives as far as the lidar shows room (at least 8 cm) instead of skipping
+  every goal without half a metre of clear floor
+- Goals skipped for lack of room are tried again before calling it done
+- The way back no longer stops at the obstacle in front of the dock: the
+  last 60 cm go straight in (bumpers watching), and a bump there means back
+  off and try again
+
 ## 0.4.0
 
 - **Explore** button: the robot maps the house without cleaning. Starting

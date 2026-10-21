@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import protocol as p
+from . import drive
 from .drive import Bumped, DriveAborted, Driver
 from .mapper import OCCUPIED_THRESHOLD, OccupancyMap
 
@@ -38,11 +39,14 @@ ROBOT_RADIUS_M = 0.17
 CLEARANCE_M = 0.06            # extra room kept from walls when planning
 STEP_M = 0.5                  # longest straight piece driven before rescanning
 MIN_STEP_M = 0.05
+MIN_DRIVE_MM = 80             # shorter than this isn't worth a move
 MIN_GOAL_M = 0.35             # frontiers closer than this are seen already
 BACK_OFF_MM = 80
 MAX_BUMPS_PER_GOAL = 2
 TIME_LIMIT_S = 40 * 60
 MAX_STEPS = 500
+MAX_SKIP_RESETS = 2
+LAST_STRETCH_M = 0.6          # this close to the dock, drive straight in
 MIN_BATTERY = 25
 BATTERY_CHECK_EVERY = 15
 DOCK_OUT_MAX_MM = 300
@@ -323,7 +327,17 @@ class Explorer:
         return scan
 
     async def forward(self, dist_m: float, scan: list[p.ScanPoint], check: bool = True) -> None:
+        """Drive straight. With check, go only as far as the lidar shows room
+        (a furnished room rarely has a clear half metre); too little room at
+        all raises DriveAborted."""
         mm = int(round(dist_m * 1000))
+        if check:
+            free = p.corridor_clearance_mm(scan, forward=mm > 0)
+            if free is not None:
+                room = free - drive.CLEARANCE_MARGIN_MM
+                if room < MIN_DRIVE_MM:
+                    raise DriveAborted(f"only {free} mm free at {0 if mm > 0 else 180} deg")
+                mm = int(math.copysign(min(abs(mm), room), mm))
         if abs(mm) < 10:
             return
         await self.driver.move(mm, mm, scan, check_clearance=check)
@@ -365,6 +379,7 @@ class Explorer:
             self.status = "exploring"
             bumps: dict[tuple[float, float], int] = {}
             stuck = 0
+            skip_resets = 0
             while not (self.stop_requested or self.go_home_requested):
                 if self.steps >= MAX_STEPS:
                     _LOGGER.info("Explore: step limit reached")
@@ -377,6 +392,12 @@ class Explorer:
                 scan = await self.observe()
                 planner = Planner(self.occ, self.blocked)
                 path = planner.nearest_frontier(self.pose.x, self.pose.y, self.skip)
+                if path is None and self.skip and skip_resets < MAX_SKIP_RESETS:
+                    # Goals skipped for lack of room may be reachable from here
+                    skip_resets += 1
+                    _LOGGER.info("Explore: retrying %d skipped goals", len(self.skip))
+                    self.skip.clear()
+                    continue
                 if path is None:
                     _LOGGER.info("Explore: nothing left to explore after %d steps", self.steps)
                     break
@@ -428,29 +449,45 @@ class Explorer:
         self.out_m = out_mm / 1000
 
     async def _return_to_dock(self) -> None:
-        """Drive to a point in front of the dock, face away from it and reverse in."""
+        """Drive to the point it first drove out to, face away from the dock and reverse in."""
         approach = (self.out_m, 0.0)
-        for _ in range(40):
-            scan = await self.observe()
-            if math.dist((self.pose.x, self.pose.y), approach) < 0.08:
+        for attempt in range(3):
+            await self._head_for(approach)
+            try:
+                await self._back_in(approach)
                 break
+            except Bumped as err:
+                _LOGGER.info("Explore: %s near the dock, trying again", err)
+                await self.back_off(await self.observe())
+        else:
+            raise DriveAborted("couldn't get back to the dock")
+
+    async def _head_for(self, approach: tuple[float, float]) -> None:
+        for _ in range(60):
+            scan = await self.observe()
+            if math.dist((self.pose.x, self.pose.y), approach) < LAST_STRETCH_M:
+                return
             planner = Planner(self.occ, self.blocked)
             path = planner.path_to(self.pose.x, self.pose.y, *approach)
             if path is None or len(path) < 2:
-                # The planner keeps away from walls, so the last bit near the
-                # dock goes straight, watched by the bumpers
-                break
+                return
             try:
                 await self.follow(path, planner, scan)
             except Bumped:
                 await self.back_off(scan)
+            except DriveAborted as err:
+                if "free at" not in str(err):
+                    raise
+                # Tight spot: turn a bit and look again
+                await self.turn_to(self.pose.theta + 45, scan)
+
+    async def _back_in(self, approach: tuple[float, float]) -> None:
+        # The dock and whatever stands near it are too close for the lidar
+        # clearance check here; the bumpers still watch every move
         scan = await self.observe()
-        # Get onto the dock's axis, then face away from the dock and reverse in.
-        # The last stretch is too close to the dock for the lidar clearance
-        # check; the bumpers still watch it.
         dist = math.dist((self.pose.x, self.pose.y), approach)
         if dist >= MIN_STEP_M:
-            scan = await self.turn_to(math.degrees(math.atan2(-self.pose.y, approach[0] - self.pose.x)), scan)
+            scan = await self.turn_to(math.degrees(math.atan2(approach[1] - self.pose.y, approach[0] - self.pose.x)), scan)
             await self.forward(dist, scan, check=False)
             scan = await self.observe()
         # Two passes: the second turn fixes what the first one's odometry got wrong

@@ -83,6 +83,30 @@ def test_something_close_in_front_of_the_dock(fast):
     assert explorer.docked
 
 
+def legs(cx, cy, w, h, size=0.04):
+    """Four square legs of a table or chair centred at (cx, cy)."""
+    out = []
+    for x in (cx - w / 2, cx + w / 2):
+        for y in (cy - h / 2, cy + h / 2):
+            out += [(x, y, x + size, y), (x + size, y, x + size, y + size),
+                    (x + size, y + size, x, y + size), (x, y + size, x, y)]
+    return out
+
+
+def test_furnished_living_room(fast):
+    furniture = (legs(1.8, 0.8, 1.2, 0.8)            # dining table
+                 + legs(1.0, 0.8, 0.4, 0.4) + legs(2.6, 0.8, 0.4, 0.4)   # chairs
+                 + legs(1.8, -0.2, 0.4, 0.4) + legs(1.8, 1.8, 0.4, 0.4)
+                 + [(0.45, 0.12, 0.45, 0.4), (0.45, 0.4, 0.6, 0.4), (0.6, 0.4, 0.6, 0.12)])  # by the dock
+    robot = FakeRobot(extra_walls=furniture)
+    explorer, occ = run_explore(robot)
+    assert explorer.error is None, explorer.error
+    assert free_area_m2(occ) > 30
+    col, row = occ.world_to_cell(6.0, 0.0)
+    assert occ.grid[row, col] < 0, "second room not mapped"
+    assert explorer.docked
+
+
 def test_scan_matching_corrects_turn_drift(fast):
     robot = FakeRobot()
     robot.turn_error = 1.03  # odometry over-reads every turn by 3%
