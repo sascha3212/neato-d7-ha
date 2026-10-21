@@ -223,7 +223,12 @@ class NeatoService:
 
     # -- driving in TestMode ------------------------------------------------
 
-    def _can_drive(self, what: str) -> bool:
+    async def _can_drive(self, what: str) -> bool:
+        if self.explore_task is None:
+            # The cached reading can be a minute old, e.g. just after the
+            # robot was put back on its dock by hand
+            self.charger = p.parse_charger(await self.link.command("GetCharger"))
+            self._last_charger = time.monotonic()
         ui = self.state.ui_state
         if self.explore_task is not None:
             reason = "already exploring"
@@ -240,7 +245,7 @@ class NeatoService:
         return False
 
     async def _start_explore(self) -> None:
-        if not self._can_drive("Explore"):
+        if not await self._can_drive("Explore"):
             return
         _LOGGER.info("Explore: mapping the house without cleaning")
         self.map.start_session()
@@ -283,7 +288,7 @@ class NeatoService:
         self._published.clear()  # robot status is stale; republish on the next pass
 
     async def _drive_test(self) -> None:
-        if not self._can_drive("Drive test"):
+        if not await self._can_drive("Drive test"):
             self.ha.publish("drive/state", "refused: see the Explore sensor for why")
             return
         _LOGGER.info("Drive test: out of the dock, a full circle and back in, in TestMode")

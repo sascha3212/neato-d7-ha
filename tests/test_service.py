@@ -286,3 +286,31 @@ def test_explore_refused_off_dock(fast, tmp_path):
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_explore_reads_fresh_dock_state(fast, monkeypatch, tmp_path):
+    """Put back on the dock by hand: the cached charger reading is stale."""
+    from neato import drive
+    monkeypatch.setattr(drive.asyncio, "sleep", _fast_sleep)
+    monkeypatch.setattr(drive, "SPEED_MM_S", 100000)
+    monkeypatch.setattr(drive, "MOVE_SETTLE_S", 0.0)
+    monkeypatch.setattr(drive, "WATCH_INTERVAL_S", 0.0)
+
+    async def scenario():
+        robot = FakeRobot()
+        robot.true_pose = [1.0, 0.0, 0.0]
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "battery" in ha.published)
+            robot.true_pose = [0.0, 0.0, 0.0]  # carried back to the dock
+            ha.on_command(ha.topic("send_command"), "explore")
+            await wait_for(lambda: ha.published.get("robot_state") == "exploring")
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())

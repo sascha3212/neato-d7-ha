@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Explore and Drive test read the dock state fresh, so they no longer refuse
+  right after the robot was put back on its dock by hand
+
 ## 0.4.1
 
 After the first real Explore run gave up after 4 minutes in a furnished room:
