@@ -217,6 +217,47 @@ def parse_lds_scan(raw: str) -> tuple[list[ScanPoint], float]:
     return points, speed
 
 
+BUMPER_BITS = ("LSIDEBIT", "LFRONTBIT", "LLDSBIT", "RSIDEBIT", "RFRONTBIT", "RLDSBIT")
+WHEEL_LIFT_BITS = ("SNSR_LEFT_WHEEL_EXTENDED", "SNSR_RIGHT_WHEEL_EXTENDED")
+
+
+def bumpers_hit(digital: dict[str, str]) -> list[str]:
+    """Names of pressed bumper sections and lifted wheels from GetDigitalSensors."""
+    return [name for name in BUMPER_BITS + WHEEL_LIFT_BITS if _to_bool(digital.get(name))]
+
+
+def drop_distances_mm(analog: dict[str, str]) -> list[int]:
+    """Cliff sensor readings from GetAnalogSensors ("DropSensorLeft,mm,19,")."""
+    out = []
+    for name in ("DropSensorLeft", "DropSensorRight", "LeftDropInMM", "RightDropInMM"):
+        value = analog.get(name)
+        if value is None:
+            continue
+        for part in reversed(value.split(",")):
+            try:
+                out.append(int(float(part)))
+                break
+            except ValueError:
+                continue
+    return out
+
+
+def wheel_positions_mm(motors: dict[str, str]) -> tuple[float, float] | None:
+    try:
+        return (float(motors["LeftWheel_PositionInMM"].split(",")[0]),
+                float(motors["RightWheel_PositionInMM"].split(",")[0]))
+    except (KeyError, ValueError):
+        return None
+
+
+def clearance_mm(scan: list[ScanPoint], centre_deg: int, half_width_deg: int = 30) -> int | None:
+    """Closest valid lidar reading within +-half_width of a direction (0 = ahead)."""
+    hits = [p.dist_mm for p in scan
+            if p.dist_mm > 0 and p.error == 0
+            and abs((p.angle_deg - centre_deg + 180) % 360 - 180) <= half_width_deg]
+    return min(hits) if hits else None
+
+
 def compute_skey(serial_value: str) -> str | None:
     """Compute the key the robot wants on SetEvent commands.
 

@@ -157,3 +157,53 @@ def test_no_finish_between_scans(fast, monkeypatch, tmp_path):
             server.close()
 
     asyncio.run(scenario())
+
+
+def run_drive_test(tmp_path, robot, monkeypatch):
+    from neato import drive
+    monkeypatch.setattr(drive.asyncio, "sleep", _fast_sleep)
+
+    async def scenario():
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "state" in ha.published)
+            ha.on_command(ha.topic("send_command"), "drive_test")
+            await wait_for(lambda: ha.published.get("drive/state", "running") != "running")
+            return ha
+        finally:
+            task.cancel()
+            server.close()
+
+    return asyncio.run(scenario())
+
+
+_real_sleep = asyncio.sleep
+
+
+async def _fast_sleep(delay, *args):
+    await _real_sleep(min(delay, 0.01), *args)
+
+
+def test_drive_test_moves_and_returns(fast, monkeypatch, tmp_path):
+    robot = FakeRobot()
+    ha = run_drive_test(tmp_path, robot, monkeypatch)
+    assert ha.published["drive/state"] == "done"
+    steps = json.loads(ha.published["drive/attributes"])["steps"]
+    assert [s["step"] for s in steps][:3] == ["docked_before", "testmode_docked", "off_dock"]
+    assert steps[2]["wheels_mm"] == [300.0, 300.0]
+    assert not robot.test_mode and not robot.lds_on
+    assert not any("Vacuum" in c or "Brush" in c for c in robot.motor_log)
+    assert (tmp_path / "drive_test.json").exists()
+
+
+def test_drive_test_stops_on_bumper(fast, monkeypatch, tmp_path):
+    robot = FakeRobot()
+    robot.bumper = True
+    ha = run_drive_test(tmp_path, robot, monkeypatch)
+    assert ha.published["drive/state"].startswith("stopped: bumper")
+    assert robot.wheels_mm == [0.0, 0.0]
+    assert not robot.test_mode

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import protocol as p
 from .connection import RobotLink
+from .drive import Driver
 from .ha_mqtt import HaMqtt
 from .mapper import MapperConfig, OccupancyMap
 from .render import render
@@ -115,6 +116,11 @@ class NeatoService:
         state = p.parse_state(await self.link.command("GetState"))
         if state is not None:
             self.state = state
+        if "TESTMODE" in self.state.ui_state:
+            # Left behind by an interrupted drive; the robot can't clean like this
+            _LOGGER.warning("Robot is still in TestMode, switching it off")
+            await self.link.command("SetMotor LWheelDisable RWheelDisable")
+            await self.link.command("TestMode Off")
         self.error = p.parse_error(await self.link.command("GetErr"))
         now = time.monotonic()
         if self.charger is None or now - self._last_charger > CHARGER_INTERVAL_S:
@@ -207,6 +213,36 @@ class NeatoService:
         self._publish_once("map/scans", self.map.scans_used)
         if now - self._last_map_save > MAP_SAVE_INTERVAL_S:
             self._save_map()
+
+    # -- driving in TestMode ------------------------------------------------
+
+    async def _drive_test(self) -> None:
+        ui = self.state.ui_state
+        if p.is_cleaning(ui) or p.is_paused(ui) or self.error is not None:
+            _LOGGER.warning("Drive test needs an idle robot without errors (state %s, error %s)", ui, self.error)
+            self.ha.publish("drive/state", "refused: robot busy or in error")
+            return
+        _LOGGER.info("Drive test: backing off the dock and turning a full circle in TestMode")
+        self.ha.publish("drive/state", "running")
+        driver = Driver(self.link)
+        try:
+            log = await driver.drive_test()
+        finally:
+            await asyncio.sleep(2)
+            await self._event(p.EVT_SEND_TO_BASE, None)
+        result = log.as_dict()
+        try:
+            (self.opts.data_dir / "drive_test.json").write_text(json.dumps(result))
+        except OSError as err:
+            _LOGGER.warning("Could not save drive test: %s", err)
+        self.ha.publish("drive/state", f"stopped: {log.aborted}"[:250] if log.aborted else "done")
+        # Scans are too big for HA attributes; keep a summary there
+        self.ha.publish("drive/attributes", {
+            "aborted": log.aborted,
+            "steps": [{k: v for k, v in step.items() if k != "scan"} | {"scan_points": len(step["scan"])}
+                      for step in log.steps],
+        })
+        self.ha.publish("drive/scans", result, retain=True)
 
     # -- robot settings ----------------------------------------------------
 
@@ -309,7 +345,9 @@ class NeatoService:
         command = data.get("command")
         # Home Assistant puts params next to "command"; older payloads nest them
         params = data.get("params") or {k: v for k, v in data.items() if k != "command"}
-        if command == "reset_map":
+        if command == "drive_test":
+            await self._drive_test()
+        elif command == "reset_map":
             _LOGGER.info("Resetting the map")
             self.map.reset()
             self._save_map()

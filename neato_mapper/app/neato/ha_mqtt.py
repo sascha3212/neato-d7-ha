@@ -123,6 +123,20 @@ class HaMqtt:
                 "entity_category": "config",
                 "icon": icon,
             })
+        self._config("button", "drive_test", {
+            "name": "Drive test",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "drive_test",
+            "entity_category": "diagnostic",
+            "icon": "mdi:steering",
+        })
+        self._config("sensor", "drive_test", {
+            "name": "Drive test",
+            "state_topic": self.topic("drive/state"),
+            "json_attributes_topic": self.topic("drive/attributes"),
+            "entity_category": "diagnostic",
+            "icon": "mdi:steering",
+        })
         self._config("button", "locate", {
             "name": "Locate",
             "command_topic": self.topic("command"),

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- "Drive test" button (diagnostic): the robot drives 30 cm out of the dock in
+  TestMode and turns a full circle in four steps, with brush and vacuum off,
+  then goes back to the dock. It records position, wheel odometry and lidar at
+  each step, to find out if a mapping drive without cleaning can work.
+  Every move is checked first and watched while it runs: bumpers, lifted
+  wheels, cliff sensors and lidar clearance stop it.
+- A robot left in TestMode is switched back automatically
+
 ## 0.2.2
 
 - Fix: between two scans the add-on thought the clean had ended, saved the

@@ -54,6 +54,11 @@ class FakeRobot:
         }
         self.navigation_mode = "Normal"
         self.sounds: list[str] = []
+        self.test_mode = False
+        self.lds_on = False
+        self.bumper = False
+        self.wheels_mm = [0.0, 0.0]
+        self.motor_log: list[str] = []
         self.rng = np.random.default_rng(7)
         seg = np.array(WALLS)
         self._a = seg[:, :2]
@@ -110,6 +115,8 @@ class FakeRobot:
     # -- protocol ----------------------------------------------------------
 
     def ui_state(self) -> str:
+        if self.test_mode:
+            return "UIMGR_STATE_TESTMODE"
         if self.cleaning:
             return "UIMGR_STATE_HOUSECLEANINGPAUSED" if self.paused else "UIMGR_STATE_HOUSECLEANINGRUNNING"
         return "UIMGR_STATE_IDLE"
@@ -164,6 +171,29 @@ class FakeRobot:
         if low.startswith("playsound"):
             self.sounds.append(cmd)
             return ""
+        if low.startswith("testmode"):
+            self.test_mode = low.endswith("on")
+            return ""
+        if low.startswith("setldsrotation"):
+            self.lds_on = low.endswith("on")
+            return ""
+        if low.startswith("setmotor"):
+            self.motor_log.append(cmd)
+            if not self.test_mode:
+                return "TestMode must be on to use this command.\r\n"
+            parts = cmd.split()
+            if "LWheelDist" in parts:
+                self.wheels_mm[0] += float(parts[parts.index("LWheelDist") + 1])
+                self.wheels_mm[1] += float(parts[parts.index("RWheelDist") + 1])
+            return ""
+        if low == "getdigitalsensors":
+            bit = int(self.bumper)
+            return f"Digital Sensor Name, Value\r\nSNSR_DC_JACK_IS_IN,0\r\nLSIDEBIT,0\r\nLFRONTBIT,{bit}\r\nRFRONTBIT,0\r\n"
+        if low == "getanalogsensors":
+            return "SensorName,Unit,Value\r\nWallSensor,mm,255,\r\nDropSensorLeft,mm,19,\r\nDropSensorRight,mm,20,\r\n"
+        if low.startswith("getmotors"):
+            return (f"Parameter,Value\r\nLeftWheel_PositionInMM,{self.wheels_mm[0]:.0f}\r\n"
+                    f"RightWheel_PositionInMM,{self.wheels_mm[1]:.0f}\r\n")
         if low == "clean house":
             self.cleaning, self.paused = True, False
             return ""
