@@ -35,16 +35,45 @@ scan into an occupancy grid. Every clean refines the same map.
 You need Home Assistant OS or Supervised (for add-ons), the Mosquitto broker
 add-on and the MQTT integration.
 
-1. **Flash the bridge.** In the ESPHome dashboard create a new device and paste
-   [`esphome/neato-bridge.yaml`](esphome/neato-bridge.yaml). Set the pins for
-   your board (same as fang: ESP32 TX 17 / RX 16, ESP32-C3 TX 7 / RX 6) and add
-   `neato_bridge_api` and `neato_bridge_ota` to your ESPHome secrets. This
-   replaces fang on the ESP; you can flash fang back at any time.
+1. **Put the bridge on the ESP32, over Wi-Fi.** No need to take the ESP out:
+   fang is ESPHome, so it accepts new firmware over the air. See
+   [Install over Wi-Fi](#install-over-wi-fi) below. This replaces fang on the
+   ESP; you can put fang back the same way at any time.
 2. **Add this repository** in Settings > Add-ons > Add-on store > ⋮ >
    Repositories: `https://github.com/sascha3212/neato-d7-ha`
 3. **Install Neato Mapper**, set *ESP32 bridge address* to the ESP's IP or
    hostname, and start it.
 4. The robot appears under Settings > Devices > MQTT as "Neato".
+
+## Install over Wi-Fi
+
+Pick whichever matches how you installed fang.
+
+**fang was installed from the ESPHome dashboard in Home Assistant**
+
+1. In the ESPHome dashboard, open fang's device (`neato-vacuum`), click Edit,
+   and replace the whole config with
+   [`esphome/neato-bridge.yaml`](esphome/neato-bridge.yaml).
+2. In that file: set the pins and `variant` to match fang's config for your
+   board, uncomment `use_address` under `wifi` and put the ESP's current IP
+   there, and make `neato_bridge_ota` in your ESPHome secrets the same password
+   as fang's `neato_vacuum_ota`.
+3. Click Install > Wirelessly. When it's done the ESP shows up as "Neato
+   Bridge"; you can then comment out `use_address` again and remove the old
+   fang device from Home Assistant.
+
+**fang was installed with the web flasher (no ESPHome dashboard)**
+
+1. Build the bridge firmware once: in the ESPHome dashboard (or ESPHome on a
+   computer) create a device from `esphome/neato-bridge.yaml`, then Install >
+   Manual download > "OTA format" to get a `.bin` file.
+2. Open fang's web page (`http://neato-vacuum.local` or the ESP's IP), find
+   the OTA section, upload the `.bin` and press Update.
+
+**Safety net:** if the new firmware ever fails to start or join Wi-Fi a few
+times in a row, ESPHome's safe mode keeps the ESP reachable for another OTA
+upload. If Wi-Fi credentials are wrong, it opens a `neato-bridge-fallback`
+hotspot where you can enter them. In both cases the ESP stays where it is.
 
 ## Show the map
 
