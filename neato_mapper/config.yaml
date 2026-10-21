@@ -1,0 +1,30 @@
+name: Neato Mapper
+version: "0.1.0"
+slug: neato_mapper
+description: Lidar maps and local control for Neato Botvac D3-D7 through an ESP32 serial bridge
+url: https://github.com/sascha3212/neato-d7-ha
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+services:
+  - mqtt:need
+options:
+  bridge_host: ""
+  bridge_port: 6638
+  name: Neato
+  map_resolution_cm: 5
+  lds_offset_mm: 0
+  lds_angle_offset_deg: 0
+  lds_clockwise: false
+schema:
+  bridge_host: str
+  bridge_port: port
+  name: str
+  map_resolution_cm: int(2,10)
+  lds_offset_mm: int(-200,200)
+  lds_angle_offset_deg: float(-180,180)
+  lds_clockwise: bool
+  debug: bool?

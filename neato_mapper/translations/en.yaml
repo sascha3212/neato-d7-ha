@@ -1,0 +1,25 @@
+configuration:
+  bridge_host:
+    name: ESP32 bridge address
+    description: IP address or hostname of the ESP32 running the neato-bridge ESPHome config.
+  bridge_port:
+    name: Bridge port
+    description: TCP port of the stream server (6638 unless you changed it).
+  name:
+    name: Robot name
+    description: Name of the device and entities in Home Assistant.
+  map_resolution_cm:
+    name: Map resolution (cm)
+    description: Size of one map cell. 5 cm is a good balance; changing it starts a new map.
+  lds_offset_mm:
+    name: Lidar offset (mm)
+    description: Distance of the lidar turret ahead of the robot's centre (negative = behind). Tune if walls look doubled.
+  lds_angle_offset_deg:
+    name: Lidar angle offset
+    description: Rotation correction for the lidar, in degrees. Tune if walls look rotated between passes.
+  lds_clockwise:
+    name: Lidar angles clockwise
+    description: Turn on if the map looks mirrored.
+  debug:
+    name: Debug logging
+    description: Log every step, useful when reporting problems.

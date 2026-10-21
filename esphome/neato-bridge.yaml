@@ -1,0 +1,74 @@
+# Neato D7 serial bridge
+#
+# Turns the ESP32 inside the robot into a plain serial-to-Wi-Fi pipe. The
+# "Neato Mapper" Home Assistant add-on connects to TCP port 6638 and does all
+# the talking to the robot, so this firmware has no Neato logic of its own.
+#
+# Uses the same wiring as fang: robot TX -> ESP RX, robot RX -> ESP TX, GND.
+# Flash it from the ESPHome dashboard in Home Assistant (new device, paste this
+# file, adjust the substitutions and secrets).
+
+substitutions:
+  name: neato-bridge
+  friendly_name: Neato Bridge
+  # Pins used by fang: ESP32 TX 17 / RX 16, ESP32-C3 TX 7 / RX 6
+  uart_tx: "17"
+  uart_rx: "16"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  # For an ESP32-C3 board use: variant: ESP32C3 (and the C3 pins above)
+  variant: ESP32
+  framework:
+    type: esp-idf
+
+logger:
+  # Keep the UART free for the robot; logs go over Wi-Fi only.
+  baud_rate: 0
+
+api:
+  encryption:
+    key: !secret neato_bridge_api
+
+ota:
+  - platform: esphome
+    password: !secret neato_bridge_ota
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name}-fallback"
+
+captive_portal:
+
+external_components:
+  - source: github://oxan/esphome-stream-server
+
+uart:
+  id: uart_bus
+  baud_rate: 115200
+  tx_pin: ${uart_tx}
+  rx_pin: ${uart_rx}
+  # A lidar scan is ~5 KB of text; leave room so nothing is dropped
+  rx_buffer_size: 8192
+
+stream_server:
+  id: neato_stream
+  uart_id: uart_bus
+  port: 6638
+  buffer_size: 8192
+
+binary_sensor:
+  - platform: stream_server
+    stream_server: neato_stream
+    connected:
+      name: "Mapper connected"
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
