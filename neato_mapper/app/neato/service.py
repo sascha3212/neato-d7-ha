@@ -299,7 +299,7 @@ class NeatoService:
             _LOGGER.warning("Unsupported vacuum command %r", cmd)
 
     async def _custom_command(self, payload: str) -> None:
-        """vacuum.send_command: "reset_map", or {"command": "raw", "params": {"cmd": "GetVersion"}}."""
+        """vacuum.send_command: "reset_map", or {"command": "raw", "cmd": "GetVersion"}."""
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -307,7 +307,8 @@ class NeatoService:
         if not isinstance(data, dict):
             data = {"command": str(data)}
         command = data.get("command")
-        params = data.get("params") or {}
+        # Home Assistant puts params next to "command"; older payloads nest them
+        params = data.get("params") or {k: v for k, v in data.items() if k != "command"}
         if command == "reset_map":
             _LOGGER.info("Resetting the map")
             self.map.reset()

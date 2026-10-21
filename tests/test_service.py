@@ -75,6 +75,9 @@ def test_clean_builds_and_publishes_map(fast, tmp_path):
             ha.on_command(ha.topic("send_command"), json.dumps({"command": "raw", "params": {"cmd": "GetVersion"}}))
             await wait_for(lambda: "raw/attributes" in ha.published)
             assert "BotVacD7Connected" in json.loads(ha.published["raw/attributes"])["response"]
+            # The shape Home Assistant actually sends
+            ha.on_command(ha.topic("send_command"), json.dumps({"command": "raw", "cmd": "GetState"}))
+            await wait_for(lambda: "GetState" == json.loads(ha.published["raw/attributes"])["command"])
 
             ha.on_command(ha.topic("command"), "stop")
             await wait_for(lambda: json.loads(ha.published["state"])["state"] == "docked")
