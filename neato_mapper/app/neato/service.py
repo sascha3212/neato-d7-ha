@@ -131,7 +131,7 @@ class NeatoService:
         if active and now - self._last_scan >= self.scan_interval:
             self._last_scan = now
             await self._map_step()
-        elif was_active:
+        elif was_active and not active:
             _LOGGER.info("Cleaning finished: %d scans in map", self.map.scans_used)
             self._save_map()
 

@@ -1,5 +1,5 @@
 name: Neato Mapper
-version: "0.2.1"
+version: "0.2.2"
 slug: neato_mapper
 description: Lidar maps and local control for Neato Botvac D3-D7 through an ESP32 serial bridge
 url: https://github.com/sascha3212/neato-d7-ha

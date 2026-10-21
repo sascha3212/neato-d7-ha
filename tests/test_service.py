@@ -132,3 +132,28 @@ def test_settings_modes_and_locate(fast, tmp_path):
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_no_finish_between_scans(fast, monkeypatch, tmp_path):
+    """Loop passes between two scans must not count as the end of a clean."""
+    monkeypatch.setattr(svc, "SCAN_INTERVAL_S", 0.5)
+
+    async def scenario():
+        robot = FakeRobot(speed=0.3)
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        saves = []
+        service._save_map = lambda: saves.append(1)
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: ha.available)
+            ha.on_command(ha.topic("command"), "start")
+            await wait_for(lambda: service.map.scans_used >= 3)
+            assert saves == []
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())

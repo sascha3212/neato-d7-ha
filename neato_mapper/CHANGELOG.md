@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Fix: between two scans the add-on thought the clean had ended, saved the
+  whole map every few seconds and got fewer scans than intended
+- `vacuum.send_command` with `raw` accepts params the way Home Assistant sends them
+
 ## 0.2.1
 
 - Gentler on the robot while it cleans: one lidar scan every 4 s (was back
