@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Drive test reverses the 30 cm back into the dock itself and checks the
+  charging contacts, instead of "send to base": the robot only accepts that
+  during a clean, and only finds its dock when the clean started there
+
 ## 0.3.0
 
 - "Drive test" button (diagnostic): the robot drives 30 cm out of the dock in

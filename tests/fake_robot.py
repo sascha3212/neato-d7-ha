@@ -134,7 +134,7 @@ class FakeRobot:
             return ""
         if low == "getcharger":
             self.advance(0.05)
-            ext = 0 if self.cleaning else 1
+            ext = 0 if self.cleaning or sum(self.wheels_mm) != 0 else 1  # off the dock
             return f"Label,Value\r\nFuelPercent,87\r\nChargingActive,{ext}\r\nExtPwrPresent,{ext}\r\n"
         if low.startswith("getrobotpos"):
             self.advance(0.05)

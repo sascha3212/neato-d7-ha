@@ -162,6 +162,7 @@ def test_no_finish_between_scans(fast, monkeypatch, tmp_path):
 def run_drive_test(tmp_path, robot, monkeypatch):
     from neato import drive
     monkeypatch.setattr(drive.asyncio, "sleep", _fast_sleep)
+    monkeypatch.setattr(drive, "SPEED_MM_S", 2000)  # moves are timed in wall-clock
 
     async def scenario():
         server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
@@ -195,6 +196,8 @@ def test_drive_test_moves_and_returns(fast, monkeypatch, tmp_path):
     steps = json.loads(ha.published["drive/attributes"])["steps"]
     assert [s["step"] for s in steps][:3] == ["docked_before", "testmode_docked", "off_dock"]
     assert steps[2]["wheels_mm"] == [300.0, 300.0]
+    assert steps[-1]["step"] == "back_on_dock"
+    assert ha.published["drive/state"] == "done"  # charger contacts found again
     assert not robot.test_mode and not robot.lds_on
     assert not any("Vacuum" in c or "Brush" in c for c in robot.motor_log)
     assert (tmp_path / "drive_test.json").exists()

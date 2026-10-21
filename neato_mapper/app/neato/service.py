@@ -222,23 +222,25 @@ class NeatoService:
             _LOGGER.warning("Drive test needs an idle robot without errors (state %s, error %s)", ui, self.error)
             self.ha.publish("drive/state", "refused: robot busy or in error")
             return
-        _LOGGER.info("Drive test: backing off the dock and turning a full circle in TestMode")
+        _LOGGER.info("Drive test: out of the dock, a full circle and back in, in TestMode")
         self.ha.publish("drive/state", "running")
-        driver = Driver(self.link)
-        try:
-            log = await driver.drive_test()
-        finally:
-            await asyncio.sleep(2)
-            await self._event(p.EVT_SEND_TO_BASE, None)
+        log = await Driver(self.link).drive_test()
         result = log.as_dict()
         try:
             (self.opts.data_dir / "drive_test.json").write_text(json.dumps(result))
         except OSError as err:
             _LOGGER.warning("Could not save drive test: %s", err)
-        self.ha.publish("drive/state", f"stopped: {log.aborted}"[:250] if log.aborted else "done")
+        if log.aborted:
+            state = f"stopped: {log.aborted}"
+        elif not log.docked:
+            state = "done, but not back on the dock"
+        else:
+            state = "done"
+        self.ha.publish("drive/state", state[:250])
         # Scans are too big for HA attributes; keep a summary there
         self.ha.publish("drive/attributes", {
             "aborted": log.aborted,
+            "docked": log.docked,
             "steps": [{k: v for k, v in step.items() if k != "scan"} | {"scan_points": len(step["scan"])}
                       for step in log.steps],
         })

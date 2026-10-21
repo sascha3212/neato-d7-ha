@@ -36,10 +36,11 @@ class DriveAborted(Exception):
 class DriveLog:
     steps: list[dict] = field(default_factory=list)
     aborted: str | None = None
+    docked: bool | None = None
     started: float = field(default_factory=time.time)
 
     def as_dict(self) -> dict:
-        return {"started": self.started, "aborted": self.aborted, "steps": self.steps}
+        return {"started": self.started, "aborted": self.aborted, "docked": self.docked, "steps": self.steps}
 
 
 class Driver:
@@ -88,10 +89,11 @@ class Driver:
     async def stop_wheels(self) -> None:
         await self.link.command("SetMotor LWheelDisable RWheelDisable")
 
-    async def move(self, left_mm: int, right_mm: int, scan: list[p.ScanPoint]) -> None:
+    async def move(self, left_mm: int, right_mm: int, scan: list[p.ScanPoint],
+                   check_clearance: bool = True) -> None:
         """One checked move. Straight moves need lidar clearance that way."""
         await self._safety()
-        if left_mm == right_mm:
+        if check_clearance and left_mm == right_mm:
             direction = 0 if left_mm > 0 else 180
             free = p.clearance_mm(scan, direction)
             if free is not None and free < abs(left_mm) + CLEARANCE_MARGIN_MM:
@@ -122,7 +124,8 @@ class Driver:
                 _LOGGER.error("Could not send %r while leaving TestMode: %s", cmd, err)
 
     async def drive_test(self) -> DriveLog:
-        """Drive 30 cm out of the dock, turn a full circle in four steps, record everything.
+        """Drive 30 cm out of the dock, turn a full circle in four steps, reverse
+        back in, and record everything on the way.
 
         Neatos back into their dock, so leaving it is a forward move.
         """
@@ -135,6 +138,13 @@ class Driver:
             for i in range(4):
                 await self.move(-QUARTER_TURN_MM, QUARTER_TURN_MM, scan)
                 scan = await self.snapshot(f"turn_{i + 1}")
+            # The robot only finds its dock by itself during a clean, so it
+            # reverses the 30 cm back in. The dock is right behind it, so no
+            # lidar clearance check here; the bumpers still stop it.
+            await self.move(-300, -300, scan, check_clearance=False)
+            await asyncio.sleep(2)
+            self.log.docked = p.parse_charger(await self.link.command("GetCharger")).external_power
+            await self.snapshot("back_on_dock")
         except DriveAborted as err:
             _LOGGER.warning("Drive test stopped: %s", err)
             self.log.aborted = str(err)
