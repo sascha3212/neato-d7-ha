@@ -90,7 +90,7 @@ class NeatoService:
         version = p.csv_values(await self.link.command("GetVersion"))
         self.skey = p.compute_skey(version.get("Serial Number", ""))
         _LOGGER.info("Robot %s, software %s, SetEvent key %s",
-                     version.get("Product Model", "?"), version.get("Software", "?"),
+                     p.product_model(version), p.software_version(version),
                      "ok" if self.skey else "unavailable (using plain Clean commands)")
         self.ha.set_available(True)
         self._published.clear()

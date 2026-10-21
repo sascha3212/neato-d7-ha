@@ -82,6 +82,20 @@ def csv_values(raw: str) -> dict[str, str]:
     return values
 
 
+def product_model(version: dict[str, str]) -> str:
+    """GetVersion has "Product Model,X,," on older firmware and "Model,X,905-0415," on the D7."""
+    raw = version.get("Product Model") or version.get("Model") or ""
+    return raw.split(",")[0].strip() or "?"
+
+
+def software_version(version: dict[str, str]) -> str:
+    """"Software,4,4,0,72,0" -> "4.4.0-72"."""
+    parts = [x.strip() for x in version.get("Software", "").split(",") if x.strip()]
+    if len(parts) >= 4:
+        return f"{'.'.join(parts[:3])}-{parts[3]}"
+    return ".".join(parts) or "?"
+
+
 def parse_state(raw: str) -> RobotState | None:
     ui = re.search(r"Current UI State is:\s*(\S+)", raw)
     robot = re.search(r"Current Robot State is:\s*(\S+)", raw)

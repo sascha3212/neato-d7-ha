@@ -80,3 +80,12 @@ def test_user_settings():
     assert p.toggle_state(s, "Missing") is None
     assert p.set_toggle("StealthLED", True, True) == "SetUserSettings StealthLED OFF"
     assert p.set_toggle("WallEnable", False, False) == "SetUserSettings WallEnable OFF"
+
+
+def test_version_fields():
+    d7 = p.csv_values("Component,Major,Minor,Build,Aux\r\nModel,BotVacD7Connected,905-0415,\r\nSoftware,4,4,0,72,0\r\n")
+    assert p.product_model(d7) == "BotVacD7Connected"
+    assert p.software_version(d7) == "4.4.0-72"
+    old = p.csv_values("Product Model,BotVacD5Connected,,\r\nSoftware,4,5,3\r\n")
+    assert p.product_model(old) == "BotVacD5Connected"
+    assert p.software_version(old) == "4.5.3"
