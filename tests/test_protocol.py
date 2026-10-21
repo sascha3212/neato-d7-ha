@@ -40,3 +40,25 @@ def test_skey_matches_reference_implementation():
     assert p.compute_skey("ABC12345DE,0123456789AB,D") == "b20e9dfade296f1210da702bf"
     assert p.compute_skey("OPS01234AA,f0fe6b123456,D") == "e40fc9acdc7e68171bd7045fa"
     assert p.compute_skey("no-comma") is None
+
+
+# Answers captured from a real Botvac D7 (software 4.4.0-72) on 2026-10-21,
+# including the echoed command line the robot prints first
+REAL_POSE = "GetRobotPos Smooth\r\nRobot Smooth pose: X=0.000, Y=0.000, Theta=0.000, Time=38327.516362 \r\n"
+REAL_STATE = "GetState\r\nCurrent UI State is: UIMGR_STATE_STANDBY\r\nCurrent Robot State is: ST_C_Standby\r\n"
+REAL_ERR = "GetErr\r\nError\r\n200 -  (UI_ALERT_INVALID)\r\nAlert\r\n200 -  (UI_ALERT_INVALID)\r\nUSB state \r\n NOT connected \r\n"
+REAL_CHARGER = (
+    "GetCharger\r\nLabel,Value\r\nFuelPercent,98\r\nBatteryOverTemp,0\r\nChargingActive,0\r\n"
+    "ChargingEnabled,1\r\nConfidentOnFuel,0\r\nExtPwrPresent,1\r\nVBattV,16.57\r\n"
+)
+
+
+def test_real_d7_answers():
+    pose = p.parse_pose(p.strip_echo(REAL_POSE, "GetRobotPos Smooth"))
+    assert pose == p.Pose(0.0, 0.0, 0.0, 38327.516362)
+    state = p.parse_state(p.strip_echo(REAL_STATE, "GetState"))
+    assert state.ui_state == "UIMGR_STATE_STANDBY"
+    assert p.parse_error(p.strip_echo(REAL_ERR, "GetErr")) is None
+    charger = p.parse_charger(p.strip_echo(REAL_CHARGER, "GetCharger"))
+    assert charger.battery_percent == 98 and charger.external_power and not charger.charging
+    assert p.ha_vacuum_state(state.ui_state, charger, None) == "docked"
