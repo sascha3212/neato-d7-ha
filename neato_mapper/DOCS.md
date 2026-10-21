@@ -25,6 +25,28 @@ running the `neato-bridge` ESPHome config from this repository.
 - Switches: intense clean, edge cleaning, bin full detection, button sounds,
   melodies, warning sounds, status lights
 - `button.neato_locate`: the robot beeps so you can find it
+- `button.neato_explore` and `sensor.neato_explore`: map the house without
+  cleaning (see below)
+- `button.neato_drive_test`, `sensor.neato_drive_test`: a 1-minute check that
+  manual driving works on your robot
+
+## Explore
+
+Press **Explore** with the robot on its dock. It drives out, looks around,
+and keeps driving to the nearest place it hasn't seen yet, with brush and
+vacuum off, until the whole floor is mapped; then it reverses back onto the
+dock. Plan on 10-20 minutes for a flat.
+
+It drives in the robot's TestMode, where the robot's own safety reactions are
+off, so the add-on does them: every move is checked against the lidar first
+and watched while it runs, and a bumper, a lifted wheel or a cliff sensor
+stops it. Stay around the first time, and keep cables and small things off
+the floor. Stop it any time with the vacuum's stop button (it stays where it
+is) or return to base (it drives back to the dock).
+
+The Explore sensor shows what it is doing and how it ended. If it says it
+isn't back on the dock, put it there by hand: the robot only finds its dock
+by itself during a normal clean that started there.
 - `camera.neato_map`: the map, with `calibration_points` for the Xiaomi Vacuum Map Card
 - `sensor.neato_battery`, `sensor.neato_robot_state`, `sensor.neato_error`
 - `button.neato_reset_map`, `sensor.neato_map_scans`, `sensor.neato_last_serial_response`

@@ -41,7 +41,8 @@ def lawnmower() -> list[tuple[float, float]]:
 
 
 class FakeRobot:
-    def __init__(self, speed: float = 0.3) -> None:
+    def __init__(self, speed: float = 0.3, extra_walls=()) -> None:
+        self.walls = WALLS + list(extra_walls)
         self.route = lawnmower()
         self.speed = speed
         self.clock = 0.0
@@ -59,14 +60,24 @@ class FakeRobot:
         self.bumper = False
         self.wheels_mm = [0.0, 0.0]
         self.motor_log: list[str] = []
+        # Driven by hand in TestMode: where it really is, and what odometry says
+        self.true_pose: list[float] | None = None
+        self.odom: list[float] = [0.0, 0.0, 0.0]
+        self.turn_error = 1.0     # odometry over/under-reads turns by this factor
+        self.bumps = 0
+        # Obstacles the lidar can't see (low chair rungs, a pet bowl): only the
+        # bumper finds them. Segments like WALLS.
+        self.hidden: list[tuple[float, float, float, float]] = []
         self.rng = np.random.default_rng(7)
-        seg = np.array(WALLS)
+        seg = np.array(self.walls)
         self._a = seg[:, :2]
         self._d = seg[:, 2:] - seg[:, :2]
 
     # -- motion ------------------------------------------------------------
 
     def pose(self) -> tuple[float, float, float]:
+        if self.true_pose is not None:
+            return tuple(self.true_pose)
         left = self.travel
         for (x0, y0), (x1, y1) in zip(self.route, self.route[1:]):
             length = math.dist((x0, y0), (x1, y1))
@@ -78,6 +89,44 @@ class FakeRobot:
                 return x0 + f * (x1 - x0), y0 + f * (y1 - y0), heading
             left -= length
         return 0.0, 0.0, 0.0
+
+    def wall_distance(self, x: float, y: float) -> float:
+        seg = np.array(self.walls + self.hidden)
+        a, d = seg[:, :2], seg[:, 2:] - seg[:, :2]
+        t = np.clip(((x - a[:, 0]) * d[:, 0] + (y - a[:, 1]) * d[:, 1]) / (d ** 2).sum(axis=1), 0, 1)
+        return float(np.hypot(a[:, 0] + t * d[:, 0] - x, a[:, 1] + t * d[:, 1] - y).min())
+
+    def drive(self, left_mm: float, right_mm: float) -> None:
+        """Move like the wheels would, stopping at walls with the bumper pressed."""
+        if self.true_pose is None:
+            self.true_pose = list(self.pose())
+        x, y, theta = self.true_pose
+        if abs(left_mm - right_mm) < 1e-6:
+            dist = left_mm / 1000.0
+            if dist < 0:
+                self.bumper = False
+            step = 0.01 if dist > 0 else -0.01
+            done = 0.0
+            while abs(done) < abs(dist) - 1e-9:
+                nx = x + step * math.cos(math.radians(theta))
+                ny = y + step * math.sin(math.radians(theta))
+                if dist > 0 and self.wall_distance(nx, ny) < 0.17:
+                    self.bumper = True
+                    self.bumps += 1
+                    break
+                x, y, done = nx, ny, done + step
+            o = math.radians(self.odom[2])
+            self.odom[0] += done * math.cos(o)
+            self.odom[1] += done * math.sin(o)
+        else:
+            dtheta = math.degrees(((right_mm - left_mm) / 2.0) / 121.0)  # SetMotor 190 mm turns a D7 90 deg
+            theta = (theta + dtheta) % 360.0
+            self.odom[2] = (self.odom[2] + dtheta * self.turn_error) % 360.0
+        self.true_pose = [x, y, theta]
+
+    def on_dock(self) -> bool:
+        x, y, _ = self.pose()
+        return not self.cleaning and math.hypot(x, y) < 0.03
 
     def route_length(self) -> float:
         return sum(math.dist(a, b) for a, b in zip(self.route, self.route[1:]))
@@ -134,11 +183,11 @@ class FakeRobot:
             return ""
         if low == "getcharger":
             self.advance(0.05)
-            ext = 0 if self.cleaning or sum(self.wheels_mm) != 0 else 1  # off the dock
+            ext = 1 if self.on_dock() else 0
             return f"Label,Value\r\nFuelPercent,87\r\nChargingActive,{ext}\r\nExtPwrPresent,{ext}\r\n"
         if low.startswith("getrobotpos"):
             self.advance(0.05)
-            x, y, theta = self.pose()
+            x, y, theta = self.odom if self.true_pose is not None else self.pose()
             return f"Pose: X={x:.3f} Y={y:.3f} Theta={theta:.1f} Time={self.clock:.2f}\r\n"
         if low == "getldsscan":
             # The last turret revolution, then ~0.5 s to send it at 115200 baud
@@ -183,8 +232,12 @@ class FakeRobot:
                 return "TestMode must be on to use this command.\r\n"
             parts = cmd.split()
             if "LWheelDist" in parts:
-                self.wheels_mm[0] += float(parts[parts.index("LWheelDist") + 1])
-                self.wheels_mm[1] += float(parts[parts.index("RWheelDist") + 1])
+                left = float(parts[parts.index("LWheelDist") + 1])
+                right = float(parts[parts.index("RWheelDist") + 1])
+                self.wheels_mm[0] += left
+                self.wheels_mm[1] += right
+                if not self.bumper or left < 0:
+                    self.drive(left, right)
             return ""
         if low == "getdigitalsensors":
             bit = int(self.bumper)

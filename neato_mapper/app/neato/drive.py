@@ -20,9 +20,12 @@ _LOGGER = logging.getLogger(__name__)
 
 SPEED_MM_S = 100
 WATCH_INTERVAL_S = 0.3
+# Time on top of distance / speed for the wheels to spin up and settle
+MOVE_SETTLE_S = 1.5
 # Cliff sensors read ~20 mm on a floor; much more means there is no floor
 MAX_DROP_MM = 60
-# Room needed in the travel direction beyond the move itself (robot radius + margin)
+# Room needed in the travel direction beyond the move itself (robot radius +
+# margin), measured in a strip as wide as the robot
 CLEARANCE_MARGIN_MM = 250
 # How far the drive test goes out of the dock: as far as the lidar allows, up
 # to the maximum, but not less than the minimum
@@ -34,6 +37,10 @@ QUARTER_TURN_MM = 190
 
 class DriveAborted(Exception):
     pass
+
+
+class Bumped(DriveAborted):
+    """A bumper section is pressed; the robot can usually back away from it."""
 
 
 @dataclass
@@ -58,13 +65,16 @@ class Driver:
         scan, _ = p.parse_lds_scan(await self.link.command("GetLDSScan", timeout=8))
         return scan
 
-    async def _safety(self) -> None:
+    async def _safety(self, allow_bumper: bool = False) -> None:
         digital = p.csv_values(await self.link.command("GetDigitalSensors"))
         if not any(name in digital for name in p.BUMPER_BITS):
             raise DriveAborted("can't read the bumpers, not driving")
         hit = p.bumpers_hit(digital)
-        if hit:
-            raise DriveAborted(f"bumper or wheel lift: {', '.join(hit)}")
+        lifted = [name for name in hit if name in p.WHEEL_LIFT_BITS]
+        if lifted:
+            raise DriveAborted(f"wheel lifted: {', '.join(lifted)}")
+        if hit and not allow_bumper:
+            raise Bumped(f"bumper: {', '.join(hit)}")
         drops = p.drop_distances_mm(p.csv_values(await self.link.command("GetAnalogSensors")))
         if any(d > MAX_DROP_MM for d in drops):
             raise DriveAborted(f"cliff sensor reads {drops} mm")
@@ -94,21 +104,23 @@ class Driver:
         await self.link.command("SetMotor LWheelDisable RWheelDisable")
 
     async def move(self, left_mm: int, right_mm: int, scan: list[p.ScanPoint],
-                   check_clearance: bool = True) -> None:
-        """One checked move. Straight moves need lidar clearance that way."""
-        await self._safety()
+                   check_clearance: bool = True, backing_off: bool = False) -> None:
+        """One checked move. Straight moves need lidar clearance that way.
+
+        backing_off allows a short reverse while a bumper is still pressed."""
+        await self._safety(allow_bumper=backing_off)
         if check_clearance and left_mm == right_mm:
             direction = 0 if left_mm > 0 else 180
-            free = p.clearance_mm(scan, direction)
+            free = p.corridor_clearance_mm(scan, forward=left_mm > 0)
             if free is not None and free < abs(left_mm) + CLEARANCE_MARGIN_MM:
                 raise DriveAborted(f"only {free} mm free at {direction} deg")
         await self.link.command("SetMotor LWheelEnable RWheelEnable")
         await self.link.command(f"SetMotor LWheelDist {left_mm} RWheelDist {right_mm} Speed {SPEED_MM_S}")
-        deadline = time.monotonic() + max(abs(left_mm), abs(right_mm)) / SPEED_MM_S + 1.5
+        deadline = time.monotonic() + max(abs(left_mm), abs(right_mm)) / SPEED_MM_S + MOVE_SETTLE_S
         try:
             while time.monotonic() < deadline:
                 await asyncio.sleep(WATCH_INTERVAL_S)
-                await self._safety()
+                await self._safety(allow_bumper=backing_off)
         except DriveAborted:
             await self.stop_wheels()
             raise
@@ -137,7 +149,7 @@ class Driver:
         await self.enter()
         try:
             scan = await self.snapshot("testmode_docked")
-            free = p.clearance_mm(scan, 0)
+            free = p.corridor_clearance_mm(scan, forward=True)
             out_mm = OUT_MAX_MM if free is None else min(OUT_MAX_MM, free - CLEARANCE_MARGIN_MM)
             if out_mm < OUT_MIN_MM:
                 raise DriveAborted(f"only {free} mm free in front of the dock")

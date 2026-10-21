@@ -7,6 +7,7 @@ versions, so everything here matches on labels instead of positions.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -258,12 +259,23 @@ def wheel_positions_mm(motors: dict[str, str]) -> tuple[float, float] | None:
         return None
 
 
-def clearance_mm(scan: list[ScanPoint], centre_deg: int, half_width_deg: int = 30) -> int | None:
-    """Closest valid lidar reading within +-half_width of a direction (0 = ahead)."""
-    hits = [p.dist_mm for p in scan
-            if p.dist_mm > 0 and p.error == 0
-            and abs((p.angle_deg - centre_deg + 180) % 360 - 180) <= half_width_deg]
-    return min(hits) if hits else None
+ROBOT_RADIUS_MM = 170
+
+
+def corridor_clearance_mm(scan: list[ScanPoint], forward: bool, half_width_mm: int = 200) -> int | None:
+    """How far the robot can drive straight (forward or back) before something
+    in the lidar scan enters the strip as wide as the robot. None = nothing seen."""
+    best = None
+    for pt in scan:
+        # Readings closer than the robot's own edge are its body or the dock
+        if pt.dist_mm < ROBOT_RADIUS_MM or pt.error:
+            continue
+        a = math.radians(pt.angle_deg)
+        along = pt.dist_mm * math.cos(a) * (1 if forward else -1)
+        side = pt.dist_mm * math.sin(a)
+        if along > 0 and abs(side) <= half_width_mm:
+            best = int(along) if best is None else min(best, int(along))
+    return best
 
 
 def compute_skey(serial_value: str) -> str | None:

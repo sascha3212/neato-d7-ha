@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- **Explore** button: the robot maps the house without cleaning. Starting
+  from the dock it drives (in TestMode, brush and vacuum off) to the nearest
+  edge of what it hasn't seen yet, scans, and repeats; then it reverses back
+  onto the dock. Each scan is matched against the map so far to cancel
+  odometry drift. Bumpers, lifted wheels and cliff sensors stop every move;
+  things only the bumper found are remembered and avoided. Stops after 40
+  minutes, below 25% battery, or when you press stop (stays where it is) or
+  return to base (drives back). Progress on the "Explore" sensor.
+- Straight moves check the lidar in a strip as wide as the robot
+
 ## 0.3.2
 
 - Every answer is checked against the robot's echo of the command; on a

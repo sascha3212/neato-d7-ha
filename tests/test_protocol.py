@@ -96,3 +96,12 @@ def test_echoes():
     assert p.echoes("\r\ngetcharger\r\n", "GetCharger")
     assert not p.echoes("GetState\r\nCurrent UI State is: X\r\n", "GetCharger")
     assert not p.echoes("", "GetCharger")
+
+
+def test_corridor_clearance():
+    pt = lambda a, d: p.ScanPoint(a, d, 1000, 0)
+    scan = [pt(0, 1000), pt(10, 600), pt(60, 300), pt(180, 400), pt(90, 150)]
+    # 10 deg at 600 mm: 591 ahead, 104 to the side -> in the strip
+    assert p.corridor_clearance_mm(scan, forward=True) == 590
+    assert p.corridor_clearance_mm(scan, forward=False) == 400
+    assert p.corridor_clearance_mm([pt(60, 300)], forward=True) is None  # 260 mm to the side

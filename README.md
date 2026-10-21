@@ -18,6 +18,8 @@ lidar, the cleaning path in blue, the dock in green and the robot in orange.*
 - Navigation mode (normal, gentle, deep, quick) and switches for intense
   clean, edge cleaning, sounds, status lights and bin full detection
 - Schedules through Home Assistant automations (example in the add-on docs)
+- **Explore**: maps the whole house without cleaning, driving to unexplored
+  places by itself and reversing back onto the dock
 - Battery, robot state and error sensors
 - A "Reset map" button and a raw serial command for diagnostics
 

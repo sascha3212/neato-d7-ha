@@ -123,6 +123,18 @@ class HaMqtt:
                 "entity_category": "config",
                 "icon": icon,
             })
+        self._config("button", "explore", {
+            "name": "Explore",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "explore",
+            "icon": "mdi:map-search",
+        })
+        self._config("sensor", "explore", {
+            "name": "Explore",
+            "state_topic": self.topic("explore/state"),
+            "json_attributes_topic": self.topic("explore/attributes"),
+            "icon": "mdi:map-search",
+        })
         self._config("button", "drive_test", {
             "name": "Drive test",
             "command_topic": self.topic("send_command"),

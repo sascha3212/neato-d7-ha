@@ -12,6 +12,7 @@ from pathlib import Path
 from . import protocol as p
 from .connection import RobotLink
 from .drive import Driver
+from .explore import Explorer
 from .ha_mqtt import HaMqtt
 from .mapper import MapperConfig, OccupancyMap
 from .render import render
@@ -59,6 +60,8 @@ class NeatoService:
         self._last_charger = 0.0
         self._last_scan = 0.0
         self.scan_interval = SCAN_INTERVAL_S
+        self.explorer: Explorer | None = None
+        self.explore_task: asyncio.Task | None = None
         self.settings: dict[str, str] = {}
         self._last_settings = 0.0
         self.settings_file = opts.data_dir / "settings.json"
@@ -111,6 +114,10 @@ class NeatoService:
     async def _tick(self) -> None:
         while not self.commands.empty():
             await self._handle_command(*self.commands.get_nowait())
+
+        if self.explore_task is not None:
+            await self._explore_tick()
+            return
 
         was_active = self._mapping_active()
         state = p.parse_state(await self.link.command("GetState"))
@@ -216,11 +223,68 @@ class NeatoService:
 
     # -- driving in TestMode ------------------------------------------------
 
-    async def _drive_test(self) -> None:
+    def _can_drive(self, what: str) -> bool:
         ui = self.state.ui_state
-        if p.is_cleaning(ui) or p.is_paused(ui) or self.error is not None:
-            _LOGGER.warning("Drive test needs an idle robot without errors (state %s, error %s)", ui, self.error)
-            self.ha.publish("drive/state", "refused: robot busy or in error")
+        if self.explore_task is not None:
+            reason = "already exploring"
+        elif p.is_cleaning(ui) or p.is_paused(ui) or "DOCKING" in ui:
+            reason = "robot is busy"
+        elif self.error is not None:
+            reason = f"robot reports {self.error.code} {self.error.message}"
+        elif not (self.charger and self.charger.external_power):
+            reason = "robot must start on its dock"
+        else:
+            return True
+        _LOGGER.warning("%s refused: %s", what, reason)
+        self.ha.publish("explore/state", f"refused: {reason}"[:250])
+        return False
+
+    async def _start_explore(self) -> None:
+        if not self._can_drive("Explore"):
+            return
+        _LOGGER.info("Explore: mapping the house without cleaning")
+        self.map.start_session()
+
+        def updated() -> None:
+            self._map_dirty = True
+
+        self.explorer = Explorer(Driver(self.link), self.map, on_update=updated)
+        self.explore_task = asyncio.create_task(self.explorer.run())
+
+    async def _explore_tick(self) -> None:
+        """While exploring the explorer owns the serial link; just report."""
+        assert self.explorer is not None and self.explore_task is not None
+        ex = self.explorer
+        self._publish_once("state", {"state": "returning" if ex.status == "returning" else "cleaning"})
+        self._publish_once("robot_state", "exploring" if ex.status != "returning" else "returning")
+        self._publish_once("explore/state", ex.status)
+        self._maybe_publish_map()
+        if not self.explore_task.done():
+            await asyncio.sleep(STATUS_INTERVAL_S)
+            return
+        task, self.explore_task, self.explorer = self.explore_task, None, None
+        err = task.exception()
+        if err is not None:
+            _LOGGER.error("Explore failed: %s", err)
+            self._published.pop("explore/state", None)
+            self._publish_once("explore/state", f"stopped: {err}"[:250])
+            if isinstance(err, ConnectionError):
+                raise err
+        else:
+            _LOGGER.info("Explore %s after %d steps, %s", ex.status, ex.steps,
+                         "back on the dock" if ex.docked else "not on the dock")
+            self._publish_once("explore/state", ex.status[:250])
+        self.ha.publish("explore/attributes", {
+            "steps": ex.steps, "docked": ex.docked, "bumper_obstacles": len(ex.blocked),
+            "skipped_goals": len(ex.skip), "scans_in_map": self.map.scans_used,
+        })
+        self._save_map()
+        self._maybe_publish_map(force=True)
+        self._published.clear()  # robot status is stale; republish on the next pass
+
+    async def _drive_test(self) -> None:
+        if not self._can_drive("Drive test"):
+            self.ha.publish("drive/state", "refused: see the Explore sensor for why")
             return
         _LOGGER.info("Drive test: out of the dock, a full circle and back in, in TestMode")
         self.ha.publish("drive/state", "running")
@@ -316,6 +380,14 @@ class NeatoService:
 
     async def _vacuum_command(self, cmd: str) -> None:
         _LOGGER.info("Vacuum command: %s", cmd)
+        if self.explorer is not None:
+            if cmd in ("stop", "pause"):
+                self.explorer.stop_requested = True
+            elif cmd == "return_to_base":
+                self.explorer.go_home_requested = True
+            else:
+                _LOGGER.warning("Ignoring %s while exploring", cmd)
+            return
         ui = self.state.ui_state
         if cmd == "start":
             if p.is_paused(ui):
@@ -347,7 +419,11 @@ class NeatoService:
         command = data.get("command")
         # Home Assistant puts params next to "command"; older payloads nest them
         params = data.get("params") or {k: v for k, v in data.items() if k != "command"}
-        if command == "drive_test":
+        if command == "explore":
+            await self._start_explore()
+        elif self.explore_task is not None:
+            _LOGGER.warning("Ignoring %s while exploring", command)
+        elif command == "drive_test":
             await self._drive_test()
         elif command == "reset_map":
             _LOGGER.info("Resetting the map")

@@ -232,3 +232,57 @@ def test_out_of_sync_answer_reconnects():
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_explore_button(fast, monkeypatch, tmp_path):
+    from neato import drive
+    monkeypatch.setattr(drive.asyncio, "sleep", _fast_sleep)
+    monkeypatch.setattr(drive, "SPEED_MM_S", 100000)
+    monkeypatch.setattr(drive, "MOVE_SETTLE_S", 0.0)
+    monkeypatch.setattr(drive, "WATCH_INTERVAL_S", 0.0)
+
+    async def scenario():
+        robot = FakeRobot()
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "battery" in ha.published)
+            ha.on_command(ha.topic("send_command"), "explore")
+            await wait_for(lambda: ha.published.get("robot_state") == "exploring")
+            await wait_for(lambda: ha.published.get("explore/state") == "done", timeout=60)
+            attrs = json.loads(ha.published["explore/attributes"])
+            assert attrs["docked"] is True and attrs["steps"] > 10
+            assert service.map.scans_used > 10
+            assert (tmp_path / "map.npz").exists()
+            assert robot.on_dock() and not robot.test_mode
+            await wait_for(lambda: json.loads(ha.published.get("state", "{}")).get("state") == "docked")
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())
+
+
+def test_explore_refused_off_dock(fast, tmp_path):
+    async def scenario():
+        robot = FakeRobot()
+        robot.true_pose = [1.0, 0.0, 0.0]
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "battery" in ha.published)
+            ha.on_command(ha.topic("send_command"), "explore")
+            await wait_for(lambda: "explore/state" in ha.published)
+            assert ha.published["explore/state"] == "refused: robot must start on its dock"
+            assert not robot.test_mode
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())
