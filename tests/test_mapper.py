@@ -49,12 +49,12 @@ def test_skips_scans_taken_while_spinning():
 def test_render_and_calibration(tmp_path):
     occ = OccupancyMap(MapperConfig())
     run_clean(occ, FakeRobot(speed=0.3), 80)
-    out = render(occ, scale=4)
+    out = render(occ, px_per_m=100)
     assert out is not None and out.png.startswith(b"\x89PNG")
     origin, x1, y1 = out.calibration_points
-    # 1 m is 20 cells at 5 cm, 80 px at scale 4; +Y points up in the image
-    assert abs((x1["map"]["x"] - origin["map"]["x"]) - 80) < 0.01
-    assert abs((origin["map"]["y"] - y1["map"]["y"]) - 80) < 0.01
+    # 1 m is 100 px; +Y points up in the image
+    assert abs((x1["map"]["x"] - origin["map"]["x"]) - 100) < 0.01
+    assert abs((origin["map"]["y"] - y1["map"]["y"]) - 100) < 0.01
 
     occ.save(tmp_path / "map.npz")
     again = OccupancyMap(MapperConfig())

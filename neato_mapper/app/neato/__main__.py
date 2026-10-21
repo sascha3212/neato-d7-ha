@@ -27,7 +27,7 @@ def load_options(path: Path) -> Options:
     if not host:
         raise SystemExit("bridge_host is not set: enter the ESP32 bridge's IP or hostname")
     mapper = MapperConfig(
-        resolution_m=float(opt("map_resolution_cm", "NEATO_MAP_RESOLUTION_CM", 5)) / 100,
+        resolution_m=float(opt("map_resolution_cm", "NEATO_MAP_RESOLUTION_CM", 3)) / 100,
         lds_offset_m=float(opt("lds_offset_mm", "NEATO_LDS_OFFSET_MM", 0)) / 1000,
         lds_angle_offset_deg=float(opt("lds_angle_offset_deg", "NEATO_LDS_ANGLE_OFFSET_DEG", 0)),
         lds_clockwise=str(opt("lds_clockwise", "NEATO_LDS_CLOCKWISE", False)).lower() == "true",

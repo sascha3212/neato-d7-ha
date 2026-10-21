@@ -27,10 +27,14 @@ FREE_THRESHOLD = -1.0
 
 @dataclass
 class MapperConfig:
-    resolution_m: float = 0.05
+    resolution_m: float = 0.03
     size_m: float = 40.0
     max_range_m: float = 5.0
     min_range_m: float = 0.12
+    # Long rays at grazing angles nibble holes in walls; only trust the free
+    # space they show up to this distance, and stop a few cm short of the hit
+    max_free_range_m: float = 4.0
+    free_margin_m: float = 0.06
     # Where the lidar sits relative to the robot centre (+ = forward), and a
     # rotation correction in case the turret's zero isn't exactly forward.
     lds_offset_m: float = 0.0
@@ -114,12 +118,12 @@ class OccupancyMap:
         angles, dists = angles[keep], dists[keep]
 
         hits = dists <= cfg.max_range_m
-        free_len = np.minimum(dists, cfg.max_range_m)
+        free_len = np.minimum(dists - cfg.free_margin_m, cfg.max_free_range_m)
 
         # Free space: sample every ray at half-cell steps up to just before the hit
         step = cfg.resolution_m / 2
-        samples = np.arange(0.0, cfg.max_range_m, step)
-        mask = samples[None, :] < (free_len[:, None] - cfg.resolution_m)
+        samples = np.arange(0.0, cfg.max_free_range_m, step)
+        mask = samples[None, :] < free_len[:, None]
         fx = sx + samples[None, :] * np.cos(angles)[:, None]
         fy = sy + samples[None, :] * np.sin(angles)[:, None]
         fcol, frow = self.world_to_cell(fx[mask], fy[mask])

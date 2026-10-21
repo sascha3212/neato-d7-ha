@@ -10,7 +10,7 @@ running the `neato-bridge` ESPHome config from this repository.
 | ESP32 bridge address | (required) | IP or hostname of the ESP32 bridge |
 | Bridge port | 6638 | TCP port of the ESPHome stream server |
 | Robot name | Neato | Device name in Home Assistant |
-| Map resolution (cm) | 5 | Size of one map cell; changing it starts a new map |
+| Map resolution (cm) | 3 | Size of one map cell; changing it starts a new map |
 | Lidar offset (mm) | 0 | Turret position ahead of the centre (negative = behind) |
 | Lidar angle offset | 0 | Rotation correction for the lidar, in degrees |
 | Lidar angles clockwise | off | Turn on if the map looks mirrored |

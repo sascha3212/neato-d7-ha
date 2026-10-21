@@ -35,7 +35,7 @@ class Options:
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     mapper: MapperConfig = field(default_factory=MapperConfig)
-    map_scale: int = 4
+    map_px_per_m: int = 100
 
 
 class NeatoService:
@@ -162,7 +162,7 @@ class NeatoService:
         now = time.monotonic()
         if not force and (not self._map_dirty or now - self._last_map_publish < MAP_PUBLISH_INTERVAL_S):
             return
-        rendered = render(self.map, self.opts.map_scale)
+        rendered = render(self.map, self.opts.map_px_per_m)
         self._last_map_publish = now
         self._map_dirty = False
         if rendered is None:
