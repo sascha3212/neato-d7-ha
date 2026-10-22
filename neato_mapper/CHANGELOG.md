@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.3
+
+After the robot's serial port got out of step during the second Explore run:
+
+- An answer that belongs to another command is no longer fatal: the add-on
+  skips leftovers in front of its own echo, or waits for the line to go
+  quiet, throws away what's there and asks again. It logs what came back.
+- Fewer commands while driving: bumpers every 0.5 s (was 0.3 s), cliff
+  sensors every other poll, a pause after each lidar scan, 150 ms between
+  commands
+- Explore attributes are updated even when a run fails
+
 ## 0.4.2
 
 - Explore and Drive test read the dock state fresh, so they no longer refuse

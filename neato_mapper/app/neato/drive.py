@@ -19,7 +19,10 @@ from .connection import RobotLink
 _LOGGER = logging.getLogger(__name__)
 
 SPEED_MM_S = 100
-WATCH_INTERVAL_S = 0.3
+# Bumper poll while moving. Faster polling made a D7's serial port choke.
+WATCH_INTERVAL_S = 0.5
+# A lidar scan is ~5 KB; give the robot a moment after sending one
+SCAN_PAUSE_S = 0.3
 # Time on top of distance / speed for the wheels to spin up and settle
 MOVE_SETTLE_S = 1.5
 # Cliff sensors read ~20 mm on a floor; much more means there is no floor
@@ -63,9 +66,10 @@ class Driver:
 
     async def _scan(self) -> list[p.ScanPoint]:
         scan, _ = p.parse_lds_scan(await self.link.command("GetLDSScan", timeout=8))
+        await asyncio.sleep(SCAN_PAUSE_S)
         return scan
 
-    async def _safety(self, allow_bumper: bool = False) -> None:
+    async def _safety(self, allow_bumper: bool = False, cliffs: bool = True) -> None:
         digital = p.csv_values(await self.link.command("GetDigitalSensors"))
         if not any(name in digital for name in p.BUMPER_BITS):
             raise DriveAborted("can't read the bumpers, not driving")
@@ -75,6 +79,8 @@ class Driver:
             raise DriveAborted(f"wheel lifted: {', '.join(lifted)}")
         if hit and not allow_bumper:
             raise Bumped(f"bumper: {', '.join(hit)}")
+        if not cliffs:
+            return
         drops = p.drop_distances_mm(p.csv_values(await self.link.command("GetAnalogSensors")))
         if any(d > MAX_DROP_MM for d in drops):
             raise DriveAborted(f"cliff sensor reads {drops} mm")
@@ -117,10 +123,14 @@ class Driver:
         await self.link.command("SetMotor LWheelEnable RWheelEnable")
         await self.link.command(f"SetMotor LWheelDist {left_mm} RWheelDist {right_mm} Speed {SPEED_MM_S}")
         deadline = time.monotonic() + max(abs(left_mm), abs(right_mm)) / SPEED_MM_S + MOVE_SETTLE_S
+        polls = 0
         try:
             while time.monotonic() < deadline:
                 await asyncio.sleep(WATCH_INTERVAL_S)
-                await self._safety(allow_bumper=backing_off)
+                # Bumpers every poll, cliff sensors every other one: fewer
+                # commands per second keep the serial port calm
+                polls += 1
+                await self._safety(allow_bumper=backing_off, cliffs=polls % 2 == 0)
         except DriveAborted:
             await self.stop_wheels()
             raise

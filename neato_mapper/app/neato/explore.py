@@ -298,6 +298,7 @@ class Explorer:
         """Read pose and a scan while standing still, correct drift, update the map."""
         odom = await self._odom()
         scan, _ = p.parse_lds_scan(await self.link.command("GetLDSScan", timeout=8))
+        await asyncio.sleep(drive.SCAN_PAUSE_S)
         guess = self.frame.apply(odom)
         matched = match_scan(self.occ, scan, guess)
         if matched is not guess:

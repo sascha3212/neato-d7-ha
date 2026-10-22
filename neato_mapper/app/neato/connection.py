@@ -11,7 +11,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # Pause between commands; the robot's serial task can hang when it is
 # hammered back to back while it cleans
-INTER_COMMAND_DELAY_S = 0.1
+INTER_COMMAND_DELAY_S = 0.15
+# After an answer that belongs to another command, wait for this much silence
+RESYNC_QUIET_S = 0.5
 
 
 class RobotLink:
@@ -45,12 +47,13 @@ class RobotLink:
                 pass
         self._reader = self._writer = None
 
-    async def _drain_input(self) -> None:
+    async def _drain_input(self, quiet_s: float = 0.3) -> None:
         """Throw away boot logs or half answers left in the pipe."""
-        assert self._reader is not None
+        if self._reader is None:
+            return
         while True:
             try:
-                data = await asyncio.wait_for(self._reader.read(4096), 0.3)
+                data = await asyncio.wait_for(self._reader.read(4096), quiet_s)
             except asyncio.TimeoutError:
                 return
             if not data:
@@ -59,25 +62,44 @@ class RobotLink:
     async def command(self, cmd: str, timeout: float | None = None) -> str:
         """Send one command and return its answer without the echo line."""
         async with self._lock:
-            if not self.connected:
-                await self.connect()
-            assert self._reader is not None and self._writer is not None
-            try:
-                self._writer.write(cmd.encode("ascii") + b"\n")
-                await self._writer.drain()
-                data = await asyncio.wait_for(
-                    self._reader.readuntil(TERMINATOR), timeout or self.timeout
-                )
-            except (OSError, asyncio.IncompleteReadError, asyncio.TimeoutError) as err:
-                _LOGGER.warning("Command %r failed (%s), reconnecting", cmd, err)
-                await self.close()
-                raise ConnectionError(f"{cmd} failed: {err}") from err
-            text = data[: -len(TERMINATOR)].decode("ascii", errors="replace")
-            if not echoes(text, cmd):
-                # An answer to an earlier command (after a timeout, say): every
-                # answer from here on would be one behind, so start over clean
-                _LOGGER.warning("Answer to %r doesn't start with its echo, resyncing", cmd)
-                await self.close()
-                raise ConnectionError(f"{cmd}: out of sync with the robot")
-            await asyncio.sleep(INTER_COMMAND_DELAY_S)
+            for attempt in range(2):
+                text = await self._exchange(cmd, timeout)
+                answer = self._match(text, cmd)
+                if answer is not None:
+                    await asyncio.sleep(INTER_COMMAND_DELAY_S)
+                    return answer
+                # Probably the tail of an earlier answer: let the pipe go
+                # quiet, throw away what's in it, and ask again
+                _LOGGER.warning("Answer to %r is for something else (%r), resyncing",
+                                cmd, text.strip()[:120])
+                await self._drain_input(quiet_s=RESYNC_QUIET_S)
+            await self.close()
+            raise ConnectionError(f"{cmd}: out of sync with the robot")
+
+    async def _exchange(self, cmd: str, timeout: float | None) -> str:
+        if not self.connected:
+            await self.connect()
+        assert self._reader is not None and self._writer is not None
+        try:
+            self._writer.write(cmd.encode("ascii") + b"\n")
+            await self._writer.drain()
+            data = await asyncio.wait_for(
+                self._reader.readuntil(TERMINATOR), timeout or self.timeout
+            )
+        except (OSError, asyncio.IncompleteReadError, asyncio.TimeoutError) as err:
+            _LOGGER.warning("Command %r failed (%s), reconnecting", cmd, err)
+            await self.close()
+            raise ConnectionError(f"{cmd} failed: {err}") from err
+        return data[: -len(TERMINATOR)].decode("ascii", errors="replace")
+
+    @staticmethod
+    def _match(text: str, cmd: str) -> str | None:
+        """The answer to cmd, or None if the text belongs to another command."""
+        if echoes(text, cmd):
             return strip_echo(text, cmd)
+        lines = text.replace("\r", "").split("\n")
+        # Leftovers of an earlier answer in front of ours: our echo comes later
+        for i, line in enumerate(lines):
+            if line.strip().lower() == cmd.strip().lower():
+                return "\n".join(lines[i + 1:])
+        return None

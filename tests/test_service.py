@@ -212,22 +212,54 @@ def test_drive_test_stops_on_bumper(fast, monkeypatch, tmp_path):
     assert not robot.test_mode
 
 
-def test_out_of_sync_answer_reconnects():
+def _serve_lines(answer):
+    """A bridge that answers every line with answer(line)."""
+    async def handle(reader, writer):
+        while line := await reader.readline():
+            writer.write(answer(line.decode().strip()))
+            await writer.drain()
+    return handle
+
+
+def test_out_of_sync_answer_gives_up_after_resync(monkeypatch):
+    from neato import connection
     from neato.connection import RobotLink
+    monkeypatch.setattr(connection, "RESYNC_QUIET_S", 0.05)
 
     async def scenario():
-        async def handle(reader, writer):
-            await reader.readline()
-            writer.write(b"GetState\r\nCurrent UI State is: X\r\n\x1a")  # answer to something else
-            await writer.drain()
-
-        server = await asyncio.start_server(handle, "127.0.0.1", 0)
-        port = server.sockets[0].getsockname()[1]
-        link = RobotLink("127.0.0.1", port)
+        # Always the answer to something else
+        server = await asyncio.start_server(
+            _serve_lines(lambda cmd: b"GetState\r\nCurrent UI State is: X\r\n\x1a"), "127.0.0.1", 0)
+        link = RobotLink("127.0.0.1", server.sockets[0].getsockname()[1])
         try:
             with pytest.raises(ConnectionError):
                 await link.command("GetCharger")
             assert not link.connected
+        finally:
+            server.close()
+
+    asyncio.run(scenario())
+
+
+def test_leftover_answer_is_skipped(monkeypatch):
+    from neato import connection
+    from neato.connection import RobotLink
+    monkeypatch.setattr(connection, "RESYNC_QUIET_S", 0.05)
+    sent = []
+
+    def answer(cmd):
+        sent.append(cmd)
+        reply = f"{cmd}\r\nFuelPercent,87\r\n".encode() + b"\x1a"
+        if len(sent) == 1:  # the tail of an earlier lidar scan arrives first
+            return b"358,1200,900,0\r\n359,1210,900,0\r\nROTATION_SPEED,5.00\r\n\x1a" + reply
+        return reply
+
+    async def scenario():
+        server = await asyncio.start_server(_serve_lines(answer), "127.0.0.1", 0)
+        link = RobotLink("127.0.0.1", server.sockets[0].getsockname()[1])
+        try:
+            assert "FuelPercent,87" in await link.command("GetCharger")
+            assert "FuelPercent,87" in await link.command("GetCharger")  # and in step again
         finally:
             server.close()
 

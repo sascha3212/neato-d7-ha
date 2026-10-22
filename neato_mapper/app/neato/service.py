@@ -269,9 +269,16 @@ class NeatoService:
             return
         task, self.explore_task, self.explorer = self.explore_task, None, None
         err = task.exception()
+        self.ha.publish("explore/attributes", {
+            "steps": ex.steps, "docked": ex.docked, "bumper_obstacles": len(ex.blocked),
+            "skipped_goals": len(ex.skip), "scans_in_map": self.map.scans_used,
+            "error": str(err) if err else ex.error,
+        })
+        self._save_map()
+        self._maybe_publish_map(force=True)
+        self._published.clear()  # robot status is stale; republish on the next pass
         if err is not None:
             _LOGGER.error("Explore failed: %s", err)
-            self._published.pop("explore/state", None)
             self._publish_once("explore/state", f"stopped: {err}"[:250])
             if isinstance(err, ConnectionError):
                 raise err
@@ -279,13 +286,6 @@ class NeatoService:
             _LOGGER.info("Explore %s after %d steps, %s", ex.status, ex.steps,
                          "back on the dock" if ex.docked else "not on the dock")
             self._publish_once("explore/state", ex.status[:250])
-        self.ha.publish("explore/attributes", {
-            "steps": ex.steps, "docked": ex.docked, "bumper_obstacles": len(ex.blocked),
-            "skipped_goals": len(ex.skip), "scans_in_map": self.map.scans_used,
-        })
-        self._save_map()
-        self._maybe_publish_map(force=True)
-        self._published.clear()  # robot status is stale; republish on the next pass
 
     async def _drive_test(self) -> None:
         if not await self._can_drive("Drive test"):
