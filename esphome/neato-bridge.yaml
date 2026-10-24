@@ -90,3 +90,8 @@ sensor:
   - platform: wifi_signal
     name: "WiFi signal"
     update_interval: 60s
+
+# Lets the add-on's recovery automations restart the bridge itself
+button:
+  - platform: restart
+    name: "Restart bridge"
