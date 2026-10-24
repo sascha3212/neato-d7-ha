@@ -149,6 +149,19 @@ class HaMqtt:
             "entity_category": "diagnostic",
             "icon": "mdi:steering",
         })
+        self._config("button", "clear_errors", {
+            "name": "Clear errors",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "clear_errors",
+            "icon": "mdi:notification-clear-all",
+        })
+        self._config("button", "restart_robot", {
+            "name": "Restart robot",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "restart_robot",
+            "entity_category": "config",
+            "icon": "mdi:restart",
+        })
         self._config("button", "locate", {
             "name": "Locate",
             "command_topic": self.topic("command"),
@@ -176,6 +189,12 @@ class HaMqtt:
             "name": "Error",
             "state_topic": self.topic("error"),
             "icon": "mdi:alert-circle-outline",
+        })
+        self._config("sensor", "last_clean", {
+            "name": "Last clean",
+            "state_topic": self.topic("last_clean"),
+            "device_class": "timestamp",
+            "icon": "mdi:calendar-clock",
         })
         self._config("sensor", "map_scans", {
             "name": "Map scans",

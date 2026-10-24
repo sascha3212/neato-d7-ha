@@ -76,6 +76,20 @@ class RobotLink:
             await self.close()
             raise ConnectionError(f"{cmd}: out of sync with the robot")
 
+    async def send_only(self, cmd: str) -> None:
+        """Send a command that gets no answer (the robot restarts on it)."""
+        async with self._lock:
+            if not self.connected:
+                await self.connect()
+            assert self._writer is not None
+            try:
+                self._writer.write(cmd.encode("ascii") + b"\n")
+                await self._writer.drain()
+            except OSError as err:
+                await self.close()
+                raise ConnectionError(f"{cmd} failed: {err}") from err
+            await asyncio.sleep(INTER_COMMAND_DELAY_S)
+
     async def _exchange(self, cmd: str, timeout: float | None) -> str:
         if not self.connected:
             await self.connect()

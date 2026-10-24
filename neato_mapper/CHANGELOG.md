@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+What the old fang automations used, so they can move over:
+
+- "Last clean" sensor (timestamp of when the last clean started), kept
+  across restarts, for "once a day" automations
+- "Clear errors" button (`SetUIError clearall`)
+- "Restart robot" button: power-cycles the robot like fang's PowerCycle
+
 ## 0.4.3
 
 After the robot's serial port got out of step during the second Explore run:

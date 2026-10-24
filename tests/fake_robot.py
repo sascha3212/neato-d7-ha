@@ -247,6 +247,13 @@ class FakeRobot:
         if low.startswith("getmotors"):
             return (f"Parameter,Value\r\nLeftWheel_PositionInMM,{self.wheels_mm[0]:.0f}\r\n"
                     f"RightWheel_PositionInMM,{self.wheels_mm[1]:.0f}\r\n")
+        if low == "setuierror clearall":
+            self.errors_cleared = getattr(self, "errors_cleared", 0) + 1
+            return ""
+        if low.startswith("setsystemmode"):
+            self.restarts = getattr(self, "restarts", 0) + 1
+            self.test_mode = False
+            return None  # rebooting: no answer
         if low == "clean house":
             self.cleaning, self.paused = True, False
             return ""
@@ -258,7 +265,10 @@ class FakeRobot:
                 cmd = line.decode().strip()
                 if not cmd:
                     continue
-                writer.write(f"{cmd}\r\n{self.answer(cmd)}".encode() + b"\x1a")
+                reply = self.answer(cmd)
+                if reply is None:
+                    continue
+                writer.write(f"{cmd}\r\n{reply}".encode() + b"\x1a")
                 await writer.drain()
         except ConnectionError:
             pass

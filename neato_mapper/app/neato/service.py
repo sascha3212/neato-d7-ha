@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,6 +67,8 @@ class NeatoService:
         self._last_settings = 0.0
         self.settings_file = opts.data_dir / "settings.json"
         self.navigation_mode = self._load_navigation_mode()
+        # When the last clean started (ISO time), for "once a day" automations
+        self.last_clean: str | None = self._load_stored().get("last_clean")
         self._last_map_publish = 0.0
         self._last_map_save = time.monotonic()
         self._map_dirty = True
@@ -141,6 +144,9 @@ class NeatoService:
         if active and not was_active:
             _LOGGER.info("Cleaning started, recording a new path")
             self.map.start_session()
+            if p.is_cleaning(self.state.ui_state):
+                self.last_clean = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self._save_stored()
         if active and now - self._last_scan >= self.scan_interval:
             self._last_scan = now
             await self._map_step()
@@ -191,6 +197,8 @@ class NeatoService:
         if self.charger and self.charger.battery_percent is not None:
             self._publish_once("battery", self.charger.battery_percent)
         self._publish_once("settings/navigation_mode", self.navigation_mode)
+        if self.last_clean:
+            self._publish_once("last_clean", self.last_clean)
         for object_id, _name, _key, label, _icon, _inverted in p.TOGGLE_SETTINGS:
             on = p.toggle_state(self.settings, label)
             if on is not None:
@@ -323,16 +331,23 @@ class NeatoService:
             self.settings = settings
         self._last_settings = time.monotonic()
 
-    def _load_navigation_mode(self) -> str:
+    def _load_stored(self) -> dict:
         try:
-            mode = json.loads(self.settings_file.read_text()).get("navigation_mode")
-        except (OSError, ValueError, AttributeError):
-            mode = None
+            data = json.loads(self.settings_file.read_text())
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _load_navigation_mode(self) -> str:
+        mode = self._load_stored().get("navigation_mode")
         return mode if mode in p.NAVIGATION_MODES else "Normal"
 
-    def _save_navigation_mode(self) -> None:
+    def _save_stored(self) -> None:
         try:
-            self.settings_file.write_text(json.dumps({"navigation_mode": self.navigation_mode}))
+            self.settings_file.write_text(json.dumps({
+                "navigation_mode": self.navigation_mode,
+                "last_clean": self.last_clean,
+            }))
         except OSError as err:
             _LOGGER.warning("Could not save settings: %s", err)
 
@@ -349,7 +364,7 @@ class NeatoService:
                 return
             # The robot forgets this on restart, so it is also sent before every clean
             self.navigation_mode = payload
-            self._save_navigation_mode()
+            self._save_stored()
             await self.link.command(f"SetNavigationMode {payload}")
         else:
             toggle = next((t for t in p.TOGGLE_SETTINGS if t[0] == object_id), None)
@@ -414,7 +429,8 @@ class NeatoService:
             _LOGGER.warning("Unsupported vacuum command %r", cmd)
 
     async def _custom_command(self, payload: str) -> None:
-        """vacuum.send_command: "reset_map", or {"command": "raw", "cmd": "GetVersion"}."""
+        """vacuum.send_command: "reset_map", "clear_errors", "restart_robot", "explore",
+        "drive_test", or {"command": "raw", "cmd": "GetVersion"}."""
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -424,7 +440,18 @@ class NeatoService:
         command = data.get("command")
         # Home Assistant puts params next to "command"; older payloads nest them
         params = data.get("params") or {k: v for k, v in data.items() if k != "command"}
-        if command == "explore":
+        if command == "clear_errors":
+            _LOGGER.info("Clearing the robot's errors and alerts")
+            await self.link.command("SetUIError clearall")
+        elif command == "restart_robot":
+            # What fang's PowerCycle button did: the robot reboots and is
+            # silent for a while, so nothing waits for an answer
+            _LOGGER.info("Restarting the robot")
+            await self.link.command("TestMode On")
+            await self.link.send_only("SetSystemMode PowerCycle")
+            await self.link.close()
+            raise ConnectionError("robot is restarting")
+        elif command == "explore":
             await self._start_explore()
         elif self.explore_task is not None:
             _LOGGER.warning("Ignoring %s while exploring", command)

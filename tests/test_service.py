@@ -67,6 +67,9 @@ def test_clean_builds_and_publishes_map(fast, tmp_path):
 
             ha.on_command(ha.topic("command"), "start")
             await wait_for(lambda: json.loads(ha.published["state"])["state"] == "cleaning")
+            await wait_for(lambda: "last_clean" in ha.published)
+            assert ha.published["last_clean"].startswith("20")
+            assert json.loads((tmp_path / "settings.json").read_text())["last_clean"] == ha.published["last_clean"]
             await wait_for(lambda: service.map.scans_used >= 40)
             assert ha.published["map/image"].startswith(b"\x89PNG")
             attrs = json.loads(ha.published["map/attributes"])
@@ -341,6 +344,28 @@ def test_explore_reads_fresh_dock_state(fast, monkeypatch, tmp_path):
             robot.true_pose = [0.0, 0.0, 0.0]  # carried back to the dock
             ha.on_command(ha.topic("send_command"), "explore")
             await wait_for(lambda: ha.published.get("robot_state") == "exploring")
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())
+
+
+def test_clear_errors_and_restart(fast, tmp_path):
+    async def scenario():
+        robot = FakeRobot()
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "battery" in ha.published)
+            ha.on_command(ha.topic("send_command"), "clear_errors")
+            await wait_for(lambda: getattr(robot, "errors_cleared", 0) == 1)
+            ha.on_command(ha.topic("send_command"), "restart_robot")
+            await wait_for(lambda: getattr(robot, "restarts", 0) == 1)
+            assert not robot.test_mode
         finally:
             task.cancel()
             server.close()
