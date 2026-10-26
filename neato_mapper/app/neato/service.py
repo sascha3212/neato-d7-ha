@@ -68,7 +68,14 @@ class NeatoService:
         self.settings_file = opts.data_dir / "settings.json"
         self.navigation_mode = self._load_navigation_mode()
         # When the last clean started (ISO time), for "once a day" automations
-        self.last_clean: str | None = self._load_stored().get("last_clean")
+        stored = self._load_stored()
+        self.last_clean: str | None = stored.get("last_clean")
+        self.last_clean_minutes: int | None = stored.get("last_clean_minutes")
+        self.last_clean_type: str | None = stored.get("last_clean_type")
+        self.spot_size = {k: int(stored.get(k, p.SPOT_SIZE_DEFAULT_CM)) for k in ("spot_width", "spot_height")}
+        self._clean_started: float | None = None
+        self.battery_temp: float | None = None
+        self.warranty: dict[str, int] = {}
         self._last_map_publish = 0.0
         self._last_map_save = time.monotonic()
         self._map_dirty = True
@@ -109,6 +116,7 @@ class NeatoService:
         self.ha.set_available(True)
         self._published.clear()
         self._last_settings = 0.0
+        await self._read_warranty()
         while True:
             await self._tick()
 
@@ -134,19 +142,19 @@ class NeatoService:
         self.error = p.parse_error(await self.link.command("GetErr"))
         now = time.monotonic()
         if self.charger is None or now - self._last_charger > CHARGER_INTERVAL_S:
-            self.charger = p.parse_charger(await self.link.command("GetCharger"))
+            raw = await self.link.command("GetCharger")
+            self.charger = p.parse_charger(raw)
+            self.battery_temp = p.battery_temp_c(p.csv_values(raw))
             self._last_charger = now
         if not was_active and now - self._last_settings > CHARGER_INTERVAL_S:
             await self._read_settings()
+        await self._track_clean()
         self._publish_status()
 
         active = self._mapping_active()
         if active and not was_active:
             _LOGGER.info("Cleaning started, recording a new path")
             self.map.start_session()
-            if p.is_cleaning(self.state.ui_state):
-                self.last_clean = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                self._save_stored()
         if active and now - self._last_scan >= self.scan_interval:
             self._last_scan = now
             await self._map_step()
@@ -156,6 +164,26 @@ class NeatoService:
 
         self._maybe_publish_map(force=was_active and not active)
         await asyncio.sleep(STATUS_INTERVAL_S)
+
+    async def _track_clean(self) -> None:
+        """Start time, duration and type of a clean, for automations and dashboards."""
+        ui = self.state.ui_state
+        if self._clean_started is None and p.is_cleaning(ui):
+            self._clean_started = time.monotonic()
+            self.last_clean = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            self.last_clean_type = p.clean_type(ui)
+            self._save_stored()
+        elif self._clean_started is not None and not p.in_clean_session(ui):
+            self.last_clean_minutes = round((time.monotonic() - self._clean_started) / 60)
+            self._clean_started = None
+            _LOGGER.info("Clean (%s) took %d min", self.last_clean_type, self.last_clean_minutes)
+            self._save_stored()
+            await self._read_warranty()
+
+    async def _read_warranty(self) -> None:
+        warranty = p.parse_warranty(await self.link.command("GetWarranty"))
+        if warranty:
+            self.warranty = warranty
 
     def _mapping_active(self) -> bool:
         ui = self.state.ui_state
@@ -199,6 +227,24 @@ class NeatoService:
         self._publish_once("settings/navigation_mode", self.navigation_mode)
         if self.last_clean:
             self._publish_once("last_clean", self.last_clean)
+        if self.last_clean_minutes is not None:
+            self._publish_once("last_clean_duration", self.last_clean_minutes)
+        if self.last_clean_type:
+            self._publish_once("last_clean_type", self.last_clean_type)
+        for key, value in self.spot_size.items():
+            self._publish_once(f"settings/{key}", value)
+        for suffix, label in (("filter_change_time", "Filter Change Time (seconds)"),
+                              ("brush_change_time", "Brush Change Time (seconds)")):
+            value = p.settings_number(self.settings, label)
+            if value is not None:
+                self._publish_once(suffix, round(value))
+        if self.battery_temp is not None:
+            self._publish_once("battery_temp", self.battery_temp)
+        for suffix, key in (("battery_cycles", "CumulativeBatteryCycles"),
+                            ("total_cleaning_time", "CumulativeCleaningTimeInSecs")):
+            if key in self.warranty:
+                value = self.warranty[key]
+                self._publish_once(suffix, round(value / 3600, 1) if suffix == "total_cleaning_time" else value)
         for object_id, _name, _key, label, _icon, _inverted in p.TOGGLE_SETTINGS:
             on = p.toggle_state(self.settings, label)
             if on is not None:
@@ -347,6 +393,9 @@ class NeatoService:
             self.settings_file.write_text(json.dumps({
                 "navigation_mode": self.navigation_mode,
                 "last_clean": self.last_clean,
+                "last_clean_minutes": self.last_clean_minutes,
+                "last_clean_type": self.last_clean_type,
+                **self.spot_size,
             }))
         except OSError as err:
             _LOGGER.warning("Could not save settings: %s", err)
@@ -366,6 +415,16 @@ class NeatoService:
             self.navigation_mode = payload
             self._save_stored()
             await self.link.command(f"SetNavigationMode {payload}")
+        elif object_id in self.spot_size:
+            try:
+                value = round(float(payload))
+            except ValueError:
+                _LOGGER.warning("Bad spot size %r", payload)
+                return
+            self.spot_size[object_id] = max(p.SPOT_SIZE_MIN_CM, min(p.SPOT_SIZE_MAX_CM, value))
+            self._save_stored()
+            self._publish_status()
+            return
         else:
             toggle = next((t for t in p.TOGGLE_SETTINGS if t[0] == object_id), None)
             if toggle is None or payload not in ("ON", "OFF"):
@@ -430,7 +489,9 @@ class NeatoService:
 
     async def _custom_command(self, payload: str) -> None:
         """vacuum.send_command: "reset_map", "clear_errors", "restart_robot", "explore",
-        "drive_test", or {"command": "raw", "cmd": "GetVersion"}."""
+        "drive_test", "spot_clean_size", "manual_cleaning",
+        {"command": "manual_drive", "direction": "forward", "action": "down"|"up"}
+        or {"command": "raw", "cmd": "GetVersion"}."""
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -457,6 +518,17 @@ class NeatoService:
             _LOGGER.warning("Ignoring %s while exploring", command)
         elif command == "drive_test":
             await self._drive_test()
+        elif command == "spot_clean_size":
+            await self.link.command(f"SetNavigationMode {self.navigation_mode}")
+            await self.link.command(p.spot_clean_command(self.spot_size["spot_width"], self.spot_size["spot_height"]))
+        elif command == "manual_cleaning":
+            await self._event(p.EVT_START_MANUAL, None)
+        elif command == "manual_drive" and isinstance(params, dict):
+            direction, action = params.get("direction"), params.get("action", "down")
+            if direction not in p.MANUAL_DRIVE or action not in ("down", "up"):
+                _LOGGER.warning("Bad manual drive %r", params)
+                return
+            await self._event(p.manual_drive_event(direction, action == "down"), None)
         elif command == "reset_map":
             _LOGGER.info("Resetting the map")
             self.map.reset()

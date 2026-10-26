@@ -52,6 +52,7 @@ class FakeRobot:
         self.user_settings = {
             "ClickSounds": "OFF", "LED": "ON", "Wall Enable": "ON", "Eco Mode": "ON",
             "IntenseClean": "OFF", "Melody Sounds": "OFF", "Warning Sounds": "ON", "Bin Full Detect": "ON",
+            "Filter Change Time (seconds)": "432000", "Brush Change Time (seconds)": "1296000",
         }
         self.navigation_mode = "Normal"
         self.sounds: list[str] = []
@@ -184,7 +185,11 @@ class FakeRobot:
         if low == "getcharger":
             self.advance(0.05)
             ext = 1 if self.on_dock() else 0
-            return f"Label,Value\r\nFuelPercent,87\r\nChargingActive,{ext}\r\nExtPwrPresent,{ext}\r\n"
+            return (f"Label,Value\r\nFuelPercent,87\r\nBattTempCAvg[0],31\r\n"
+                    f"ChargingActive,{ext}\r\nExtPwrPresent,{ext}\r\n")
+        if low == "getwarranty":
+            self.advance(0.05)
+            return "CumulativeCleaningTimeInSecs,001ce34f\r\nCumulativeBatteryCycles,01f7\r\nValidationCode,4a5b\r\n"
         if low.startswith("getrobotpos"):
             self.advance(0.05)
             x, y, theta = self.odom if self.true_pose is not None else self.pose()
@@ -196,6 +201,7 @@ class FakeRobot:
             return "AngleInDegrees,DistInMM,Intensity,ErrorCodeHEX\r\n" + rows + "ROTATION_SPEED,5.00\r\n"
         if low.startswith("setevent"):
             self.advance(0.05)
+            self.events = getattr(self, "events", []) + [cmd.split()[2]]
             if "START_HOUSE" in cmd or "RESUME" in cmd:
                 self.cleaning, self.paused = True, False
             elif "PAUSE" in cmd:
@@ -254,6 +260,9 @@ class FakeRobot:
             self.restarts = getattr(self, "restarts", 0) + 1
             self.test_mode = False
             return None  # rebooting: no answer
+        if low.startswith("clean spot"):
+            self.spot_cleans = getattr(self, "spot_cleans", []) + [cmd]
+            return ""
         if low == "clean house":
             self.cleaning, self.paused = True, False
             return ""

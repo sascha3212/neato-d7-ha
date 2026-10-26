@@ -371,3 +371,58 @@ def test_clear_errors_and_restart(fast, tmp_path):
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_fang_replacements(fast, tmp_path):
+    """Manual drive, sized spot clean and the counters the old dashboards used."""
+    async def scenario():
+        robot = FakeRobot(speed=0.3)
+        server = await asyncio.start_server(robot.handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        service = svc.NeatoService(svc.Options(bridge_host="127.0.0.1", bridge_port=port, data_dir=tmp_path))
+        task = asyncio.create_task(service.run())
+        try:
+            ha = service.ha
+            await wait_for(lambda: "filter_change_time" in ha.published)
+            assert ha.published["filter_change_time"] == "432000"
+            assert ha.published["brush_change_time"] == "1296000"
+            assert ha.published["battery_temp"] == "31.0"
+            assert ha.published["battery_cycles"] == "503"
+            assert ha.published["total_cleaning_time"] == str(round(0x1ce34f / 3600, 1))
+            assert ha.published["settings/spot_width"] == "200"
+
+            ha.on_command(ha.topic("set/spot_width"), "320")
+            ha.on_command(ha.topic("set/spot_height"), "999")
+            await wait_for(lambda: ha.published["settings/spot_height"] == "400")
+            assert ha.published["settings/spot_width"] == "320"
+            assert json.loads((tmp_path / "settings.json").read_text())["spot_width"] == 320
+            ha.on_command(ha.topic("send_command"), "spot_clean_size")
+            await wait_for(lambda: getattr(robot, "spot_cleans", None))
+            assert robot.spot_cleans == ["Clean Spot Width 320 Height 400"]
+
+            ha.on_command(ha.topic("send_command"), "manual_cleaning")
+            ha.on_command(ha.topic("send_command"),
+                          json.dumps({"command": "manual_drive", "direction": "arc_left", "action": "down"}))
+            ha.on_command(ha.topic("send_command"),
+                          json.dumps({"command": "manual_drive", "direction": "forward", "action": "up"}))
+            await wait_for(lambda: len(getattr(robot, "events", [])) >= 3)
+            assert robot.events == [
+                "UIMGR_EVENT_SMARTAPP_START_MANUAL_CLEANING",
+                "UIMGR_EVENT_SMARTAPP_DRIVE_MANUAL_ARC_LEFT_DOWN",
+                "UIMGR_EVENT_SMARTAPP_DRIVE_MANUAL_FORWARD_UP",
+            ]
+
+            ha.on_command(ha.topic("command"), "start")
+            await wait_for(lambda: ha.published.get("last_clean_type") == "house")
+            ha.on_command(ha.topic("command"), "pause")
+            await wait_for(lambda: robot.paused)
+            ha.on_command(ha.topic("command"), "start")
+            await wait_for(lambda: not robot.paused)
+            ha.on_command(ha.topic("command"), "stop")
+            await wait_for(lambda: "last_clean_duration" in ha.published)
+            assert ha.published["last_clean_duration"] == "0"
+        finally:
+            task.cancel()
+            server.close()
+
+    asyncio.run(scenario())

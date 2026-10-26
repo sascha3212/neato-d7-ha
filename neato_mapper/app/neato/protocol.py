@@ -19,6 +19,18 @@ EVT_PAUSE = "UIMGR_EVENT_SMARTAPP_PAUSE_CLEANING"
 EVT_RESUME = "UIMGR_EVENT_SMARTAPP_RESUME_CLEANING"
 EVT_STOP = "UIMGR_EVENT_SMARTAPP_STOP_CLEANING"
 EVT_SEND_TO_BASE = "UIMGR_EVENT_SMARTAPP_SEND_TO_BASE"
+EVT_START_MANUAL = "UIMGR_EVENT_SMARTAPP_START_MANUAL_CLEANING"
+# Manual drive as the Neato app did it (and fang): the robot drives itself
+# with its own safety. DOWN starts a movement, UP ends it.
+MANUAL_DRIVE = {
+    "forward": "FORWARD", "backward": "BACKWARDS",
+    "turn_left": "TURN_LEFT", "turn_right": "TURN_RIGHT",
+    "arc_left": "ARC_LEFT", "arc_right": "ARC_RIGHT",
+}
+
+
+def manual_drive_event(direction: str, down: bool) -> str:
+    return f"UIMGR_EVENT_SMARTAPP_DRIVE_MANUAL_{MANUAL_DRIVE[direction]}_{'DOWN' if down else 'UP'}"
 
 # Error/alert code 200 (UI_ALERT_INVALID) means "nothing to report"
 NO_ERROR_CODE = 200
@@ -77,6 +89,13 @@ def echoes(raw: str, command: str) -> bool:
         if line.strip():
             return line.strip().lower() == command.strip().lower()
     return False
+
+
+def settings_number(settings: dict[str, str], label: str) -> float | None:
+    try:
+        return float(settings[label])
+    except (KeyError, ValueError):
+        return None
 
 
 def csv_values(raw: str) -> dict[str, str]:
@@ -276,6 +295,48 @@ def corridor_clearance_mm(scan: list[ScanPoint], forward: bool, half_width_mm: i
         if along > 0 and abs(side) <= half_width_mm:
             best = int(along) if best is None else min(best, int(along))
     return best
+
+
+def parse_warranty(raw: str) -> dict[str, int]:
+    """GetWarranty: "CumulativeBatteryCycles,01f7" etc., values in hex."""
+    out = {}
+    for key, value in csv_values(raw).items():
+        try:
+            out[key] = int(value, 16)
+        except ValueError:
+            continue
+    return out
+
+
+def battery_temp_c(charger_raw: dict[str, str]) -> float | None:
+    for key in ("BattTempCAvg[0]", "BattTempCAvg"):
+        try:
+            return float(charger_raw[key])
+        except (KeyError, ValueError):
+            continue
+    return None
+
+
+def clean_type(ui_state: str) -> str | None:
+    for tag, name in (("HOUSECLEANING", "house"), ("SPOTCLEANING", "spot"), ("MANUALCLEANING", "manual")):
+        if tag in ui_state:
+            return name
+    return None
+
+
+SPOT_SIZE_MIN_CM = 100
+SPOT_SIZE_MAX_CM = 400
+SPOT_SIZE_DEFAULT_CM = 200
+
+
+def spot_clean_command(width_cm: int, height_cm: int) -> str:
+    clamp = lambda v: max(SPOT_SIZE_MIN_CM, min(SPOT_SIZE_MAX_CM, int(v)))
+    return f"Clean Spot Width {clamp(width_cm)} Height {clamp(height_cm)}"
+
+
+def in_clean_session(ui_state: str) -> bool:
+    """Cleaning, paused, or driving back to the dock after a clean."""
+    return is_cleaning(ui_state) or is_paused(ui_state) or "DOCKING" in ui_state
 
 
 def compute_skey(serial_value: str) -> str | None:

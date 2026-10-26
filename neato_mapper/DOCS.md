@@ -25,7 +25,17 @@ running the `neato-bridge` ESPHome config from this repository.
 - Switches: intense clean, edge cleaning, bin full detection, button sounds,
   melodies, warning sounds, status lights
 - `button.neato_locate`: the robot beeps so you can find it
-- `sensor.neato_last_clean`: when the last clean started
+- `sensor.neato_last_clean`: when the last clean started, plus
+  `sensor.neato_last_clean_duration` (minutes) and `sensor.neato_last_clean_type`
+  (house, spot or manual)
+- `number.neato_spot_width`, `number.neato_spot_height` (100 to 400 cm) and
+  `button.neato_spot_clean_size`: a spot clean of that size
+- `button.neato_manual_cleaning`, then `button.neato_manual_drive_<direction>_down`
+  to start moving and `..._up` to stop (forward, backward, turn_left,
+  turn_right, arc_left, arc_right): the robot's own remote control, as in the
+  Neato app, with its own safety on
+- Diagnostics: filter and brush change time, battery temperature, battery
+  cycles, total cleaning time
 - `button.neato_clear_errors`, `button.neato_restart_robot`: for recovering
   a robot stuck on an error (restart power-cycles it)
 - `button.neato_explore` and `sensor.neato_explore`: map the house without

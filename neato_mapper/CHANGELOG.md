@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0
+
+The rest of what the old fang dashboards had, so they can be pointed here:
+
+- Manual drive, the robot's own (as in the Neato app): "Manual cleaning"
+  button, then "Manual drive <direction> down" to start moving and "... up"
+  to stop, for forward, backward, turn left/right and arc left/right
+- "Spot width" and "Spot height" sliders (100 to 400 cm, remembered) and a
+  "Spot clean (size)" button
+- Sensors: last clean duration and type, filter and brush change time,
+  battery temperature, battery cycles, total cleaning time
+- "Last clean" no longer moves when a paused clean is resumed
+
 ## 0.5.0
 
 What the old fang automations used, so they can move over:

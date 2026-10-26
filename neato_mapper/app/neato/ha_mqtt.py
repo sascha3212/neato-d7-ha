@@ -8,7 +8,15 @@ from typing import Callable
 
 import paho.mqtt.client as mqtt
 
-from .protocol import FAN_SPEEDS, NAVIGATION_MODES, TOGGLE_SETTINGS
+from .protocol import (
+    FAN_SPEEDS, MANUAL_DRIVE, NAVIGATION_MODES, SPOT_SIZE_MAX_CM, SPOT_SIZE_MIN_CM, TOGGLE_SETTINGS,
+)
+
+DRIVE_ICONS = {
+    "forward": "mdi:arrow-up", "backward": "mdi:arrow-down",
+    "turn_left": "mdi:arrow-left", "turn_right": "mdi:arrow-right",
+    "arc_left": "mdi:rotate-left", "arc_right": "mdi:rotate-right",
+}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -209,6 +217,87 @@ class HaMqtt:
             "json_attributes_topic": self.topic("raw/attributes"),
             "entity_category": "diagnostic",
             "icon": "mdi:console",
+        })
+        # The robot's own manual drive, as the Neato app had it: "down" starts
+        # moving, "up" stops. Start manual cleaning first.
+        self._config("button", "manual_cleaning", {
+            "name": "Manual cleaning",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "manual_cleaning",
+            "icon": "mdi:gamepad-variant",
+        })
+        for direction in MANUAL_DRIVE:
+            label = direction.replace("_", " ")
+            for action in ("down", "up"):
+                self._config("button", f"manual_drive_{direction}_{action}", {
+                    "name": f"Manual drive {label} {action}",
+                    "command_topic": self.topic("send_command"),
+                    "payload_press": json.dumps({"command": "manual_drive", "direction": direction, "action": action}),
+                    "icon": DRIVE_ICONS[direction],
+                })
+        for object_id, name in (("spot_width", "Spot width"), ("spot_height", "Spot height")):
+            self._config("number", object_id, {
+                "name": name,
+                "command_topic": self.topic(f"set/{object_id}"),
+                "state_topic": self.topic(f"settings/{object_id}"),
+                "min": SPOT_SIZE_MIN_CM,
+                "max": SPOT_SIZE_MAX_CM,
+                "step": 10,
+                "unit_of_measurement": "cm",
+                "mode": "slider",
+                "icon": "mdi:arrow-expand-horizontal" if object_id == "spot_width" else "mdi:arrow-expand-vertical",
+            })
+        self._config("button", "spot_clean_size", {
+            "name": "Spot clean (size)",
+            "command_topic": self.topic("send_command"),
+            "payload_press": "spot_clean_size",
+            "icon": "mdi:target",
+        })
+        self._config("sensor", "last_clean_duration", {
+            "name": "Last clean duration",
+            "state_topic": self.topic("last_clean_duration"),
+            "device_class": "duration",
+            "unit_of_measurement": "min",
+            "icon": "mdi:timer-outline",
+        })
+        self._config("sensor", "last_clean_type", {
+            "name": "Last clean type",
+            "state_topic": self.topic("last_clean_type"),
+            "icon": "mdi:broom",
+        })
+        for object_id, name, icon in (("filter_change_time", "Filter change time", "mdi:air-filter"),
+                                      ("brush_change_time", "Brush change time", "mdi:brush")):
+            self._config("sensor", object_id, {
+                "name": name,
+                "state_topic": self.topic(object_id),
+                "device_class": "duration",
+                "unit_of_measurement": "s",
+                "entity_category": "diagnostic",
+                "icon": icon,
+            })
+        self._config("sensor", "battery_temp", {
+            "name": "Battery temperature",
+            "state_topic": self.topic("battery_temp"),
+            "device_class": "temperature",
+            "unit_of_measurement": "°C",
+            "state_class": "measurement",
+            "entity_category": "diagnostic",
+        })
+        self._config("sensor", "battery_cycles", {
+            "name": "Battery cycles",
+            "state_topic": self.topic("battery_cycles"),
+            "state_class": "total_increasing",
+            "entity_category": "diagnostic",
+            "icon": "mdi:battery-sync",
+        })
+        self._config("sensor", "total_cleaning_time", {
+            "name": "Total cleaning time",
+            "state_topic": self.topic("total_cleaning_time"),
+            "device_class": "duration",
+            "unit_of_measurement": "h",
+            "state_class": "total_increasing",
+            "entity_category": "diagnostic",
+            "icon": "mdi:timer-sand",
         })
         self._config("button", "reset_map", {
             "name": "Reset map",
